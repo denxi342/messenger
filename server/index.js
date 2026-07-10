@@ -15,7 +15,30 @@ const __dirname = path.dirname(__filename);
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 
 const app = express();
-app.use(cors());
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'http://localhost:5174'
+    ];
+    if (process.env.FRONTEND_URL) {
+      allowedOrigins.push(process.env.FRONTEND_URL);
+    }
+    
+    // Разрешаем запросы без origin (например, из Electron, curl)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 // Explicitly force UTF-8 charset on every JSON response so Cyrillic is never misread
 app.use((_req, res, next) => {
@@ -24,7 +47,12 @@ app.use((_req, res, next) => {
 });
 
 const server = createServer(app);
-const io = new Server(server, { cors: { origin: '*', methods: ['GET', 'POST'] } });
+const io = new Server(server, {
+  cors: {
+    ...corsOptions,
+    methods: ['GET', 'POST']
+  }
+});
 
 let db;
 
