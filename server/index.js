@@ -39,12 +39,17 @@ const corsOptions = {
   credentials: true
 };
 
-app.use(cors(corsOptions));
-app.use(express.json({ limit: '10mb' }));
-// Explicitly force UTF-8 charset on every JSON response so Cyrillic is never misread
-app.use((_req, res, next) => {
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  next();
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
+
+const io = new Server(server, {
+  cors: {
+    origin: true,
+    credentials: true,
+    methods: ['GET', 'POST']
+  }
 });
 
 const server = createServer(app);
