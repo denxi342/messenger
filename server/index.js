@@ -19,9 +19,10 @@ const app = express();
 const corsOptions = {
   origin: (origin, callback) => {
     const allowedOrigins = [
-      'http://localhost:5173',
-      'http://localhost:5174'
-    ];
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://messenger-client-k1uo.onrender.com'
+];
     if (process.env.FRONTEND_URL) {
       allowedOrigins.push(process.env.FRONTEND_URL);
     }
