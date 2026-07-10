@@ -602,6 +602,18 @@ io.on('connection', (socket) => {
   });
 });
 
+// --- CATCH-ALL: ensure every unmatched route returns JSON, never HTML ---
+app.use((req, res) => {
+  res.status(404).json({ error: `Cannot ${req.method} ${req.path}` });
+});
+
+// Express error handler — also returns JSON so the frontend never receives HTML
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, _next) => {
+  console.error(err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
 initDB().then(() => {
   server.listen(process.env.PORT || 3001);
 }).catch(() => process.exit(1));
