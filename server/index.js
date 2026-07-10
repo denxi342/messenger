@@ -1,8 +1,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
+import { createClient } from "@libsql/client";
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -125,10 +124,38 @@ async function createSession(userId, token, req) {
 }
 
 async function initDB() {
-  db = await open({
-    filename: path.join(__dirname, 'database.sqlite'),
-    driver: sqlite3.Database
-  });
+  const url = process.env.TURSO_DATABASE_URL;
+  const authToken = process.env.TURSO_AUTH_TOKEN;
+
+  if (!url || !authToken) {
+    console.error("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN variables are missing.");
+    console.error("Please set them to connect to your Turso database.");
+    process.exit(1);
+  }
+
+  const dbClient = createClient({ url, authToken });
+
+  // Compatibility adapter for existing sqlite API
+  db = {
+    async get(sql, params = []) {
+      const rs = await dbClient.execute({ sql, args: params });
+      return rs.rows.length > 0 ? rs.rows[0] : undefined;
+    },
+    async all(sql, params = []) {
+      const rs = await dbClient.execute({ sql, args: params });
+      return rs.rows;
+    },
+    async run(sql, params = []) {
+      const rs = await dbClient.execute({ sql, args: params });
+      return { 
+        lastID: rs.lastInsertRowid !== undefined ? Number(rs.lastInsertRowid) : undefined, 
+        changes: rs.rowsAffected 
+      };
+    },
+    async exec(sql) {
+      await dbClient.executeMultiple(sql);
+    }
+  };
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS users (
