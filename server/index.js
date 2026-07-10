@@ -17,6 +17,11 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+// Explicitly force UTF-8 charset on every JSON response so Cyrillic is never misread
+app.use((_req, res, next) => {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  next();
+});
 
 const server = createServer(app);
 const io = new Server(server, { cors: { origin: '*', methods: ['GET', 'POST'] } });
@@ -74,7 +79,7 @@ async function saveUserSettings(userId, settings) {
 }
 
 function getDeviceInfo(req) {
-  const ua = req.headers['user-agent'] || 'Messenger desktop';
+  const ua = req.headers['user-agent'] || 'Octave desktop';
   if (ua.includes('Electron')) return 'Windows desktop app';
   if (ua.includes('Windows')) return 'Windows browser';
   return ua.slice(0, 80);
@@ -187,14 +192,14 @@ const auth = (req, res, next) => {
 app.post(['/register', '/api/register'], async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password || username.length < 3) {
-    return res.status(400).json({ error: 'РќРёРєРЅРµР№Рј РјРёРЅРёРјСѓРј 3 СЃРёРјРІРѕР»Р°' });
+    return res.status(400).json({ error: 'Никнейм минимум 3 символа' });
   }
   if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-    return res.status(400).json({ error: 'РўРѕР»СЊРєРѕ Р»Р°С‚РёРЅРёС†Р°, С†РёС„СЂС‹ Рё _' });
+    return res.status(400).json({ error: 'Только латиница, цифры и _' });
   }
   try {
     const existing = await db.get('SELECT id FROM users WHERE username = ?', [username]);
-    if (existing) return res.status(400).json({ error: 'РќРёРєРЅРµР№Рј СѓР¶Рµ Р·Р°РЅСЏС‚' });
+    if (existing) return res.status(400).json({ error: 'Никнейм уже занят' });
     const hash = await bcrypt.hash(password, 10);
     const result = await db.run(
       'INSERT INTO users (username, password_hash, display_name) VALUES (?, ?, ?)',
@@ -214,9 +219,9 @@ app.post(['/login', '/api/login'], async (req, res) => {
   const { username, password } = req.body;
   try {
     const user = await db.get('SELECT * FROM users WHERE username = ?', [username]);
-    if (!user) return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ РЅРёРєРЅРµР№Рј РёР»Рё РїР°СЂРѕР»СЊ' });
+    if (!user) return res.status(400).json({ error: 'Неверный никнейм или пароль' });
     const match = await bcrypt.compare(password, user.password_hash);
-    if (!match) return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ РЅРёРєРЅРµР№Рј РёР»Рё РїР°СЂРѕР»СЊ' });
+    if (!match) return res.status(400).json({ error: 'Неверный никнейм или пароль' });
     const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
     await createSession(user.id, token, req);
     res.json({ token, userId: user.id, username: user.username, displayName: user.display_name || user.username });
@@ -395,7 +400,7 @@ app.delete('/api/blocked/:userId', auth, async (req, res) => {
 app.get(['/search-contact', '/api/search-contact'], auth, async (req, res) => {
   const { username } = req.query;
   if (!username) return res.json(null);
-  if (username === req.user.username) return res.status(400).json({ error: 'РќРµР»СЊР·СЏ РґРѕР±Р°РІРёС‚СЊ СЃРµР±СЏ' });
+  if (username === req.user.username) return res.status(400).json({ error: 'Нельзя добавить себя' });
   const user = await db.get('SELECT id, username, display_name, avatar_base64 FROM users WHERE username = ?', [username]);
   if (!user) return res.json(null);
   res.json(user);
