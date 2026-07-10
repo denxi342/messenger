@@ -16,6 +16,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 
 const app = express();
 
+app.use(express.json());
+
 const corsOptions = {
   origin: (origin, callback) => {
     const allowedOrigins = [
@@ -39,24 +41,19 @@ const corsOptions = {
   credentials: true
 };
 
-app.use(cors({
-  origin: true,
-  credentials: true
-}));
-
-const io = new Server(server, {
-  cors: {
-    origin: true,
-    credentials: true,
-    methods: ['GET', 'POST']
-  }
-});
+app.use(cors(corsOptions));
 
 const server = createServer(app);
+
 const io = new Server(server, {
   cors: {
-    ...corsOptions,
-    methods: ['GET', 'POST']
+    origin: [
+      "https://messenger-client-k1uo.onrender.com",
+      "http://localhost:5173",
+      "http://localhost:5174"
+    ],
+    credentials: true,
+    methods: ["GET", "POST"]
   }
 });
 
