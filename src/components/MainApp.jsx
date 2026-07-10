@@ -12,6 +12,7 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
   const [messagesData, setMessagesData] = useState({});
   const [historyLoaded, setHistoryLoaded] = useState({});
   const [unreadCounts, setUnreadCounts] = useState({});
+  const [pinnedMessages, setPinnedMessages] = useState({});
   const [showMyProfile, setShowMyProfile] = useState(false);
   const [myAvatar, setMyAvatar] = useState(null);
   const [typingUsers, setTypingUsers] = useState({});
@@ -106,10 +107,11 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
 
     socketRef.current.on('onlineUsers', (users) => setOnlineUsers(users));
 
-    socketRef.current.on('privateHistory', ({ contactId, messages }) => {
+    socketRef.current.on('privateHistory', ({ contactId, messages, pinnedMessageIds }) => {
       const cid = Number(contactId);
       setMessagesData(prev => ({ ...prev, [cid]: messages }));
       setHistoryLoaded(prev => ({ ...prev, [cid]: true }));
+      if (pinnedMessageIds) setPinnedMessages(prev => ({ ...prev, [cid]: pinnedMessageIds }));
     });
 
     socketRef.current.on('newPrivateMessage', (msg) => {
@@ -126,7 +128,7 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
       // Update last message on contact
       setContacts(prev => prev.map(c =>
         Number(c.id) === contactId
-          ? { ...c, last_message_text: msg.text, last_message_time: msg.time, last_message_sender_id: senderId }
+          ? { ...c, last_message_text: msg.is_deleted_for_all ? 'Сообщение удалено' : msg.text, last_message_time: msg.time, last_message_sender_id: senderId }
           : c
       ));
 
@@ -134,11 +136,47 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
       const chatIsOpen = activeChatRef.current && Number(activeChatRef.current.id) === contactId;
       if (isIncoming && !chatIsOpen) {
         setUnreadCounts(prev => ({ ...prev, [contactId]: (prev[contactId] || 0) + 1 }));
+      } else if (isIncoming && chatIsOpen) {
+        // Auto mark as read if chat is open
+        socketRef.current?.emit('markAsRead', contactId);
       }
 
       // Clear typing indicator when message arrives
       if (isIncoming) {
         setTypingUsers(prev => ({ ...prev, [contactId]: false }));
+      }
+    });
+
+    // Real-time message state updates
+    socketRef.current.on('messageDeletedAll', (messageId) => {
+      setMessagesData(prev => {
+        const updated = {};
+        Object.entries(prev).forEach(([cid, msgs]) => {
+          updated[cid] = msgs.map(m => m.id === messageId ? { ...m, is_deleted_for_all: 1, reactions: [] } : m);
+        });
+        return updated;
+      });
+    });
+
+    socketRef.current.on('messageEdited', ({ messageId, text }) => {
+      setMessagesData(prev => {
+        const updated = {};
+        Object.entries(prev).forEach(([cid, msgs]) => {
+          updated[cid] = msgs.map(m => m.id === messageId ? { ...m, text, is_edited: 1 } : m);
+        });
+        return updated;
+      });
+    });
+
+    socketRef.current.on('messagePinned', ({ messageId, contactId: fromContactId }) => {
+      const cid = activeChatRef.current ? Number(activeChatRef.current.id) : null;
+      if (cid) {
+        setPinnedMessages(prev => {
+          const existing = prev[cid] || [];
+          if (existing.includes(messageId)) return prev;
+          const newPinned = [...existing, messageId].slice(-3);
+          return { ...prev, [cid]: newPinned };
+        });
       }
     });
 
@@ -174,16 +212,19 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
         socketRef.current.emit('getPrivateHistory', cid);
       }
       setUnreadCounts(prev => ({ ...prev, [cid]: 0 }));
+      socketRef.current.emit('markAsRead', cid);
     }
   }, [activeChat]);
 
-  const handleSendMessage = (text) => {
+  const handleSendMessage = (text, replyToId = null, isForwarded = false) => {
     if (!activeChat || !text.trim()) return;
     socketRef.current.emit('sendPrivateMessage', {
       recipientId: Number(activeChat.id),
       text,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isE2ee: true
+      isE2ee: true,
+      replyToId,
+      isForwarded,
     });
   };
 
@@ -232,6 +273,7 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
       <ChatArea
         activeChat={activeChat}
         messages={activeChat ? (messagesData[Number(activeChat.id)] || []) : []}
+        pinnedMessages={activeChat ? (pinnedMessages[Number(activeChat.id)] || []) : []}
         onSendMessage={handleSendMessage}
         currentUser={user}
         onLogout={onLogout}
@@ -239,6 +281,7 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
         setTypingUsers={setTypingUsers}
         settings={settings}
         socket={socketRef.current}
+        contacts={contacts}
       />
     </div>
   );

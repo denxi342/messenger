@@ -27,6 +27,9 @@ export const register = async (username, password) => {
 
 export const fetchMyProfile = async (token) => {
   const res = await fetch(`${BASE_URL}/profile`, { headers: authHeaders(token) });
+  if (res.status === 401 || res.status === 404) {
+    throw new Error('AUTH_FAILED');
+  }
   if (!res.ok) throw new Error('Failed to fetch profile');
   return res.json();
 };

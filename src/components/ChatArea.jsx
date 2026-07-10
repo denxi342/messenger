@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Avatar from './Avatar';
+import MessageComponent from './Message';
 
-const EMOJI_QUICK = ['👍', '❤️', '😂', '😮', '😢', '🔥', '🎉', '👀'];
 const EMOJI_PICKER = ['😀','😂','😍','🥺','😭','🤔','🔥','❤️','👍','💯','✨','🎉','😎','🥳','👀','💀','😤','🤯','💪','🙏','😁','🤣','😊','😢','😡','🥰','🤩','😴','🤑','😏'];
 
 function groupMessages(messages, currentUserId) {
@@ -19,7 +19,13 @@ function groupMessages(messages, currentUserId) {
   return groups;
 }
 
-function ContextMenu({ x, y, msg, currentUserId, onClose, onReply, onCopy }) {
+function formatDateSeparator(time) {
+  if (!time) return null;
+  // time is "HH:MM" — try to use message date from id or a date field
+  return null; // We'll implement date separators via a date field when available
+}
+
+function ContextMenu({ x, y, msg, currentUserId, onClose, onReply, onEdit, onPin, onForward, onDeleteSelf, onDeleteAll }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -30,19 +36,19 @@ function ContextMenu({ x, y, msg, currentUserId, onClose, onReply, onCopy }) {
     return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('keydown', escHandler); };
   }, [onClose]);
 
-  // Clamp to viewport
-  const style = { top: Math.min(y, window.innerHeight - 280), left: Math.min(x, window.innerWidth - 190) };
+  const style = { top: Math.min(y, window.innerHeight - 350), left: Math.min(x, window.innerWidth - 200) };
+  const isOwn = Number(msg.sender_id) === Number(currentUserId);
+  const isDeleted = !!msg.is_deleted_for_all;
 
   const items = [
-    { icon: '↩️', label: 'Ответить', action: () => { onReply(msg); onClose(); } },
-    { icon: '📋', label: 'Копировать', action: () => { navigator.clipboard.writeText(msg.text); onClose(); } },
-    { icon: '↗️', label: 'Переслать', action: onClose },
-    { icon: '📌', label: 'Закрепить', action: onClose },
-    ...(Number(msg.sender_id) === Number(currentUserId) ? [
-      { icon: '✏️', label: 'Редактировать', action: onClose, className: '' },
-      { icon: '🗑️', label: 'Удалить', action: onClose, className: 'ctx-danger' },
-    ] : []),
-  ];
+    !isDeleted && { icon: '↩️', label: 'Ответить', action: () => { onReply(msg); onClose(); } },
+    !isDeleted && { icon: '📋', label: 'Копировать', action: () => { navigator.clipboard.writeText(msg.text); onClose(); } },
+    !isDeleted && { icon: '↗️', label: 'Переслать', action: () => { onForward(msg); onClose(); } },
+    !isDeleted && { icon: '📌', label: 'Закрепить', action: () => { onPin(msg); onClose(); } },
+    isOwn && !isDeleted && { icon: '✏️', label: 'Редактировать', action: () => { onEdit(msg); onClose(); } },
+    { icon: '🗑️', label: 'Удалить у себя', action: () => { onDeleteSelf(msg.id); onClose(); }, className: 'ctx-danger' },
+    isOwn && !isDeleted && { icon: '🗑️', label: 'Удалить у всех', action: () => { onDeleteAll(msg.id); onClose(); }, className: 'ctx-danger' },
+  ].filter(Boolean);
 
   return (
     <div className="ctx-menu" style={style} ref={ref}>
@@ -56,78 +62,246 @@ function ContextMenu({ x, y, msg, currentUserId, onClose, onReply, onCopy }) {
   );
 }
 
-function ReactionBar({ reactions, currentUserId, messageId, onToggle }) {
-  if (!reactions || reactions.length === 0) return null;
-  const grouped = {};
-  reactions.forEach(r => {
-    if (!grouped[r.emoji]) grouped[r.emoji] = { count: 0, users: [], myReacted: false };
-    grouped[r.emoji].count++;
-    grouped[r.emoji].users.push(r.username);
-    if (Number(r.user_id) === Number(currentUserId)) grouped[r.emoji].myReacted = true;
-  });
-  return (
-    <div className="reaction-bar">
-      {Object.entries(grouped).map(([emoji, data]) => (
-        <button
-          key={emoji}
-          className={`reaction-chip ${data.myReacted ? 'reacted' : ''}`}
-          onClick={() => onToggle(messageId, emoji, data.myReacted)}
-          title={data.users.join(', ')}
-        >
-          {emoji} <span>{data.count}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
+function ForwardModal({ contacts, onClose, onForward }) {
+  const [selected, setSelected] = useState([]);
 
-function ReplyQuote({ replyText, replySenderId, currentUserId, contactName, onClick }) {
-  if (!replyText) return null;
-  const isOwn = Number(replySenderId) === Number(currentUserId);
+  const toggle = (id) => {
+    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
   return (
-    <div className="reply-quote" onClick={onClick}>
-      <div className="reply-quote-bar" />
-      <div className="reply-quote-content">
-        <span className="reply-quote-name">{isOwn ? 'Вы' : contactName}</span>
-        <span className="reply-quote-text">{replyText.length > 80 ? replyText.slice(0, 80) + '…' : replyText}</span>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 340 }}>
+        <button className="modal-close-btn" onClick={onClose}>✕</button>
+        <h3>Переслать сообщение</h3>
+        <p className="modal-subtitle">Выберите контакты</p>
+        <div className="contacts-list" style={{ maxHeight: 300, overflowY: 'auto' }}>
+          {contacts.map(c => (
+            <div
+              key={c.id}
+              className={`contact-item ${selected.includes(c.id) ? 'active' : ''}`}
+              onClick={() => toggle(c.id)}
+              style={{ cursor: 'pointer', padding: '8px 12px' }}
+            >
+              <Avatar src={c.avatar_base64 || null} name={c.display_name || c.username} size={36} />
+              <div className="contact-info" style={{ marginLeft: 10 }}>
+                <span className="contact-name">{c.display_name || c.username}</span>
+              </div>
+              {selected.includes(c.id) && <span style={{ marginLeft: 'auto', color: 'var(--accent)' }}>✓</span>}
+            </div>
+          ))}
+        </div>
+        <button
+          className="add-btn"
+          style={{ marginTop: 12, width: '100%' }}
+          disabled={selected.length === 0}
+          onClick={() => { onForward(selected); onClose(); }}
+        >
+          Переслать ({selected.length})
+        </button>
       </div>
     </div>
   );
 }
 
-const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, myAvatar, setTypingUsers, settings, socket }) => {
+function EditModal({ msg, onClose, onSave }) {
+  const [text, setText] = useState(msg.text);
+  const taRef = useRef(null);
+
+  useEffect(() => { taRef.current?.focus(); taRef.current?.select(); }, []);
+
+  const handleSave = () => {
+    const t = text.trim();
+    if (t && t !== msg.text) onSave(msg.id, t);
+    onClose();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+        <button className="modal-close-btn" onClick={onClose}>✕</button>
+        <h3>Редактировать сообщение</h3>
+        <textarea
+          ref={taRef}
+          value={text}
+          onChange={e => setText(e.target.value)}
+          rows={4}
+          style={{ width: '100%', marginTop: 12, padding: 10, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', resize: 'vertical', fontSize: 14 }}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSave(); } }}
+        />
+        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+          <button className="add-btn" onClick={handleSave} style={{ flex: 1 }}>Сохранить</button>
+          <button onClick={onClose} style={{ flex: 1, padding: '8px 16px', borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', cursor: 'pointer' }}>Отмена</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PinnedBar({ pinnedMessages, messages, onScrollTo, onUnpin }) {
+  if (!pinnedMessages || pinnedMessages.length === 0) return null;
+  const currentPinnedId = pinnedMessages[pinnedMessages.length - 1];
+  const pinnedMsg = messages.find(m => m.id === currentPinnedId);
+  if (!pinnedMsg) return null;
+
+  return (
+    <div className="pinned-bar" onClick={() => onScrollTo(pinnedMsg.id)}>
+      <span className="pinned-bar-icon">📌</span>
+      <div className="pinned-bar-content">
+        <span className="pinned-bar-label">Закреплено • {pinnedMessages.length > 1 ? `${pinnedMessages.length} сообщения` : ''}</span>
+        <span className="pinned-bar-text">
+          {pinnedMsg.is_deleted_for_all ? 'Сообщение удалено' : (pinnedMsg.text?.length > 60 ? pinnedMsg.text.slice(0, 60) + '…' : pinnedMsg.text)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function SearchBar({ query, onQuery, results, currentIdx, onPrev, onNext, onClose }) {
+  const inputRef = useRef(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  return (
+    <div className="search-bar">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.5, flexShrink: 0 }}>
+        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+      </svg>
+      <input
+        ref={inputRef}
+        type="text"
+        placeholder="Поиск в чате..."
+        value={query}
+        onChange={e => onQuery(e.target.value)}
+        className="search-bar-input"
+      />
+      {results.length > 0 && (
+        <span className="search-bar-count">{currentIdx + 1} / {results.length}</span>
+      )}
+      {query && results.length === 0 && (
+        <span className="search-bar-count" style={{ color: 'var(--text-secondary)' }}>Нет результатов</span>
+      )}
+      <button className="search-bar-nav" onClick={onPrev} disabled={results.length === 0} title="Предыдущий (Shift+Enter)">↑</button>
+      <button className="search-bar-nav" onClick={onNext} disabled={results.length === 0} title="Следующий (Enter)">↓</button>
+      <button className="search-bar-close" onClick={onClose}>✕</button>
+    </div>
+  );
+}
+
+const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, myAvatar, setTypingUsers, settings, socket, contacts = [], onMessagesUpdate, pinnedMessages = [] }) => {
   const [inputText, setInputText] = useState('');
   const [replyTo, setReplyTo] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [localReactions, setLocalReactions] = useState({});
+  const [localMessages, setLocalMessages] = useState(messages);
+  const [editingMsg, setEditingMsg] = useState(null);
+  const [forwardMsg, setForwardMsg] = useState(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchIdx, setSearchIdx] = useState(0);
 
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
-  const highlightedMsgRef = useRef(null);
   const prevMsgCount = useRef(0);
   const msgRefs = useRef({});
 
   const contactName = activeChat ? (activeChat.display_name || activeChat.username) : '';
   const contactAvatar = activeChat?.avatar_base64 || null;
 
-  // Sync reactions from props
+  // Sync local messages from props
   useEffect(() => {
+    setLocalMessages(messages);
     const reactionMap = {};
     messages.forEach(m => { if (m.reactions) reactionMap[m.id] = m.reactions; });
     setLocalReactions(reactionMap);
   }, [messages]);
 
-  // Handle realtime reactions from socket
+  // Handle realtime socket events
   useEffect(() => {
     if (!socket) return;
-    const handler = ({ messageId, reactions }) => {
-      setLocalReactions(prev => ({ ...prev, [messageId]: reactions }));
+
+    const handlers = {
+      reactionsUpdated: ({ messageId, reactions }) => {
+        setLocalReactions(prev => ({ ...prev, [messageId]: reactions }));
+      },
+      messageDeletedSelf: (messageId) => {
+        setLocalMessages(prev => prev.filter(m => m.id !== messageId));
+      },
+      messageDeletedAll: (messageId) => {
+        setLocalMessages(prev => prev.map(m =>
+          m.id === messageId ? { ...m, is_deleted_for_all: 1, reactions: [] } : m
+        ));
+        setLocalReactions(prev => { const n = { ...prev }; delete n[messageId]; return n; });
+      },
+      messageEdited: ({ messageId, text }) => {
+        setLocalMessages(prev => prev.map(m =>
+          m.id === messageId ? { ...m, text, is_edited: 1 } : m
+        ));
+      },
+      deliveryUpdated: () => {
+        setLocalMessages(prev => prev.map(m =>
+          m.sender_id === Number(currentUser.userId) ? { ...m, is_delivered: 1 } : m
+        ));
+      },
+      readUpdated: ({ contactId }) => {
+        const cid = Number(contactId);
+        if (activeChat && Number(activeChat.id) === cid) {
+          setLocalMessages(prev => prev.map(m =>
+            m.sender_id === Number(currentUser.userId) ? { ...m, is_read: 1 } : m
+          ));
+        }
+      },
     };
-    socket.on('reactionsUpdated', handler);
-    return () => socket.off('reactionsUpdated', handler);
-  }, [socket]);
+
+    Object.entries(handlers).forEach(([evt, fn]) => socket.on(evt, fn));
+    return () => Object.entries(handlers).forEach(([evt, fn]) => socket.off(evt, fn));
+  }, [socket, activeChat, currentUser]);
+
+  // Keyboard shortcut Ctrl+F
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        setShowSearch(true);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
+  // Mark as read when chat opens
+  useEffect(() => {
+    if (activeChat && socket) {
+      socket.emit('markAsRead', Number(activeChat.id));
+    }
+    setShowSearch(false);
+    setSearchQuery('');
+    setReplyTo(null);
+  }, [activeChat]);
+
+  // Search logic
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      setSearchIdx(0);
+      return;
+    }
+    const q = searchQuery.toLowerCase();
+    const results = localMessages
+      .filter(m => !m.is_deleted_for_all && m.text?.toLowerCase().includes(q))
+      .map(m => m.id);
+    setSearchResults(results);
+    setSearchIdx(0);
+  }, [searchQuery, localMessages]);
+
+  // Auto-scroll to current search result
+  useEffect(() => {
+    if (searchResults.length > 0) {
+      scrollToMsg(searchResults[searchIdx], true);
+    }
+  }, [searchIdx, searchResults]);
 
   const scrollToBottom = (instant = false) => {
     messagesEndRef.current?.scrollIntoView({ behavior: instant ? 'auto' : 'smooth' });
@@ -135,8 +309,19 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
 
   useEffect(() => {
     scrollToBottom(prevMsgCount.current === 0);
-    prevMsgCount.current = messages.length;
-  }, [messages]);
+    prevMsgCount.current = localMessages.length;
+  }, [localMessages]);
+
+  const scrollToMsg = (msgId, isSearch = false) => {
+    const el = msgRefs.current[msgId];
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (!isSearch) {
+        el.classList.add('msg-highlight');
+        setTimeout(() => el.classList.remove('msg-highlight'), 1500);
+      }
+    }
+  };
 
   const autoResize = () => {
     const ta = textareaRef.current;
@@ -148,7 +333,6 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
   const handleInputChange = (e) => {
     setInputText(e.target.value);
     autoResize();
-    // Emit typing
     if (socket && activeChat) {
       socket.emit('typing', { recipientId: activeChat.id, isTyping: e.target.value.length > 0 });
     }
@@ -185,22 +369,44 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
     handleReactionToggle(msg.id, emoji, myReacted);
   };
 
-  const scrollToMsg = (msgId) => {
-    const el = msgRefs.current[msgId];
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      el.classList.add('msg-highlight');
-      setTimeout(() => el.classList.remove('msg-highlight'), 1500);
-    }
+  const handleDeleteSelf = (msgId) => {
+    if (!socket) return;
+    socket.emit('deleteMessageSelf', msgId);
+  };
+
+  const handleDeleteAll = (msgId) => {
+    if (!socket) return;
+    socket.emit('deleteMessageAll', msgId);
+  };
+
+  const handleEditSave = (msgId, newText) => {
+    if (!socket) return;
+    socket.emit('editMessage', { messageId: msgId, newText });
+  };
+
+  const handlePin = (msg) => {
+    if (!socket || !activeChat) return;
+    socket.emit('pinMessage', { messageId: msg.id, contactId: Number(activeChat.id) });
+  };
+
+  const handleForwardSend = (contactIds) => {
+    if (!socket || !forwardMsg) return;
+    contactIds.forEach(cid => {
+      socket.emit('sendPrivateMessage', {
+        recipientId: Number(cid),
+        text: forwardMsg.text,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isE2ee: true,
+        isForwarded: true,
+      });
+    });
+    setForwardMsg(null);
   };
 
   // Drag & drop
   const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
   const handleDragLeave = () => setIsDragging(false);
-  const handleDrop = (e) => {
-    e.preventDefault(); setIsDragging(false);
-    // Future: handle file upload
-  };
+  const handleDrop = (e) => { e.preventDefault(); setIsDragging(false); };
 
   if (!activeChat) {
     return (
@@ -218,7 +424,7 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
     );
   }
 
-  const groups = groupMessages(messages, currentUser.userId);
+  const groups = groupMessages(localMessages, currentUser.userId);
 
   return (
     <div
@@ -242,7 +448,29 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
           currentUserId={currentUser.userId}
           onClose={() => setContextMenu(null)}
           onReply={(msg) => setReplyTo(msg)}
-          onCopy={(msg) => navigator.clipboard.writeText(msg.text)}
+          onEdit={(msg) => setEditingMsg(msg)}
+          onPin={handlePin}
+          onForward={(msg) => setForwardMsg(msg)}
+          onDeleteSelf={handleDeleteSelf}
+          onDeleteAll={handleDeleteAll}
+        />
+      )}
+
+      {/* Forward Modal */}
+      {forwardMsg && (
+        <ForwardModal
+          contacts={contacts}
+          onClose={() => setForwardMsg(null)}
+          onForward={handleForwardSend}
+        />
+      )}
+
+      {/* Edit Modal */}
+      {editingMsg && (
+        <EditModal
+          msg={editingMsg}
+          onClose={() => setEditingMsg(null)}
+          onSave={handleEditSave}
         />
       )}
 
@@ -260,7 +488,12 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
         </div>
 
         <div className="chat-header-actions">
-          <button className="icon-btn" title="Поиск">
+          <button
+            className="icon-btn"
+            title="Поиск (Ctrl+F)"
+            onClick={() => setShowSearch(p => !p)}
+            style={showSearch ? { color: 'var(--accent)' } : {}}
+          >
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
             </svg>
@@ -280,6 +513,27 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
           <button onClick={onLogout} className="logout-btn">Выйти</button>
         </div>
       </div>
+
+      {/* Search Bar */}
+      {showSearch && (
+        <SearchBar
+          query={searchQuery}
+          onQuery={setSearchQuery}
+          results={searchResults}
+          currentIdx={searchIdx}
+          onPrev={() => setSearchIdx(i => (i - 1 + searchResults.length) % searchResults.length)}
+          onNext={() => setSearchIdx(i => (i + 1) % searchResults.length)}
+          onClose={() => { setShowSearch(false); setSearchQuery(''); }}
+        />
+      )}
+
+      {/* Pinned Message Bar */}
+      <PinnedBar
+        pinnedMessages={pinnedMessages}
+        messages={localMessages}
+        onScrollTo={scrollToMsg}
+        onUnpin={() => {}}
+      />
 
       {/* Messages */}
       <div className={`messages-list chat-bg--${settings?.chatBackground || 'solid'}`}>
@@ -302,71 +556,28 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
                 {group.messages.map((msg, mi) => {
                   const isFirst = mi === 0;
                   const isLast = mi === group.messages.length - 1;
-                  let posClass = 'msg-mid';
-                  if (isFirst && isLast) posClass = 'msg-solo';
-                  else if (isFirst) posClass = 'msg-first';
-                  else if (isLast) posClass = 'msg-last';
-
-                  const msgReactions = localReactions[msg.id] || [];
+                  const isHighlighted = searchResults[searchIdx] === msg.id;
 
                   return (
-                    <div
-                      key={mi}
-                      className="msg-bubble-wrap"
-                      ref={el => { if (el) msgRefs.current[msg.id] = el; }}
-                    >
-                      {/* Reply quote */}
-                      {msg.reply_text && (
-                        <ReplyQuote
-                          replyText={msg.reply_text}
-                          replySenderId={msg.reply_sender_id}
-                          currentUserId={currentUser.userId}
-                          contactName={contactName}
-                          onClick={() => scrollToMsg(msg.reply_to_id)}
-                        />
-                      )}
-
-                      <div className="msg-bubble-row">
-                        {/* Quick react (hover) */}
-                        <div className={`quick-react ${isOwn ? 'quick-react--left' : 'quick-react--right'}`}>
-                          {EMOJI_QUICK.map(emoji => (
-                            <button key={emoji} className="quick-react-btn" onClick={() => handleQuickReact(msg, emoji)}>
-                              {emoji}
-                            </button>
-                          ))}
-                        </div>
-
-                        <div
-                          className={`msg-bubble ${isOwn ? 'msg-bubble--own' : 'msg-bubble--other'} ${posClass} msg-bubble--${settings?.bubbleStyle || 'rounded'}`}
-                          onContextMenu={e => handleContextMenu(e, msg)}
-                        >
-                          <span className="msg-bubble__text">{msg.text}</span>
-                          <span className="msg-bubble__meta">
-                            <span className="msg-bubble__time">{msg.time}</span>
-                            {isOwn && <span className="msg-bubble__status" title="Отправлено">✓</span>}
-                          </span>
-                        </div>
-
-                        {/* Reply button */}
-                        <button
-                          className="msg-action-btn msg-reply-btn"
-                          title="Ответить"
-                          onClick={() => setReplyTo(msg)}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                            <polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
-                          </svg>
-                        </button>
-                      </div>
-
-                      {/* Reactions bar */}
-                      <ReactionBar
-                        reactions={msgReactions}
-                        currentUserId={currentUser.userId}
-                        messageId={msg.id}
-                        onToggle={handleReactionToggle}
-                      />
-                    </div>
+                    <MessageComponent
+                      key={msg.id}
+                      msg={msg}
+                      isOwn={isOwn}
+                      isFirst={isFirst}
+                      isLast={isLast}
+                      contactName={contactName}
+                      currentUser={currentUser}
+                      settings={settings}
+                      localReactions={localReactions}
+                      msgRefs={msgRefs}
+                      scrollToMsg={scrollToMsg}
+                      setReplyTo={setReplyTo}
+                      handleQuickReact={handleQuickReact}
+                      handleReactionToggle={handleReactionToggle}
+                      handleContextMenu={handleContextMenu}
+                      isHighlighted={isHighlighted}
+                      searchQuery={searchQuery}
+                    />
                   );
                 })}
               </div>
@@ -385,7 +596,7 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
             <div className="composer-reply-content">
               <span className="composer-reply-label">Ответ: </span>
               <span className="composer-reply-text">
-                {replyTo.text.length > 60 ? replyTo.text.slice(0, 60) + '…' : replyTo.text}
+                {replyTo.is_deleted_for_all ? <i>Сообщение удалено</i> : (replyTo.text.length > 60 ? replyTo.text.slice(0, 60) + '…' : replyTo.text)}
               </span>
             </div>
             <button className="composer-reply-close" onClick={() => setReplyTo(null)}>✕</button>

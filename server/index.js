@@ -229,7 +229,43 @@ async function initDB() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(user_id) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS deleted_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(message_id) REFERENCES messages(id),
+      FOREIGN KEY(user_id) REFERENCES users(id),
+      UNIQUE(message_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS pinned_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user1_id INTEGER NOT NULL,
+      user2_id INTEGER NOT NULL,
+      message_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(message_id) REFERENCES messages(id),
+      UNIQUE(user1_id, user2_id, message_id)
+    );
   `);
+
+  // Run migrations for existing databases to add new columns safely
+  const migrations = [
+    'ALTER TABLE messages ADD COLUMN is_deleted_for_all BOOLEAN DEFAULT 0;',
+    'ALTER TABLE messages ADD COLUMN is_edited BOOLEAN DEFAULT 0;',
+    'ALTER TABLE messages ADD COLUMN is_forwarded BOOLEAN DEFAULT 0;',
+    'ALTER TABLE messages ADD COLUMN is_delivered BOOLEAN DEFAULT 0;'
+  ];
+
+  for (const sql of migrations) {
+    try {
+      await db.exec(sql);
+    } catch (e) {
+      // Ignore errors if columns already exist
+    }
+  }
 }
 
 // Auth Middleware
@@ -504,18 +540,25 @@ app.get(['/my-contacts', '/api/my-contacts'], auth, async (req, res) => {
       ORDER BY c.pinned DESC, c.created_at ASC
     `, [req.user.userId]);
 
-    // Attach last message for each contact
+    // Attach last message and unread count for each contact
     for (const contact of contacts) {
       const lastMsg = await db.get(`
-        SELECT text, time, sender_id FROM messages
-        WHERE (sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?)
+        SELECT text, time, sender_id, is_deleted_for_all FROM messages
+        WHERE ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))
+          AND id NOT IN (SELECT message_id FROM deleted_messages WHERE user_id = ?)
         ORDER BY id DESC LIMIT 1
-      `, [req.user.userId, contact.id, contact.id, req.user.userId]);
+      `, [req.user.userId, contact.id, contact.id, req.user.userId, req.user.userId]);
+      
       if (lastMsg) {
-        contact.last_message_text = lastMsg.text;
+        contact.last_message_text = lastMsg.is_deleted_for_all ? 'Сообщение удалено' : lastMsg.text;
         contact.last_message_time = lastMsg.time;
         contact.last_message_sender_id = lastMsg.sender_id;
       }
+
+      const unread = await db.get(`
+        SELECT COUNT(*) as c FROM messages WHERE sender_id = ? AND recipient_id = ? AND is_read = 0
+      `, [contact.id, req.user.userId]);
+      contact.unreadCount = unread ? unread.c : 0;
     }
 
     // Sort: contacts with messages first (most recent), then contacts without
@@ -565,6 +608,16 @@ io.on('connection', (socket) => {
   socket.join(`user_${userId}`);
   broadcastOnlineStatus();
 
+  // On connection: Mark messages as delivered
+  db.all('SELECT DISTINCT sender_id FROM messages WHERE recipient_id = ? AND is_delivered = 0', [userId]).then(async (senders) => {
+    if (senders && senders.length > 0) {
+      await db.run('UPDATE messages SET is_delivered = 1 WHERE recipient_id = ? AND is_delivered = 0', [userId]);
+      senders.forEach(row => {
+        io.to(`user_${row.sender_id}`).emit('deliveryUpdated', { contactId: userId });
+      });
+    }
+  }).catch(e => console.error(e));
+
   // Typing indicator
   socket.on('typing', ({ recipientId, isTyping }) => {
     socket.to(`user_${Number(recipientId)}`).emit('typing', { userId, isTyping });
@@ -575,14 +628,15 @@ io.on('connection', (socket) => {
     const contactId = Number(rawContactId);
     const messages = await db.all(`
       SELECT m.*, u.username as senderName,
-        rm.text as reply_text, rm.sender_id as reply_sender_id
+        rm.text as reply_text, rm.sender_id as reply_sender_id, rm.is_deleted_for_all as reply_is_deleted_for_all
       FROM messages m
       JOIN users u ON m.sender_id = u.id
       LEFT JOIN messages rm ON m.reply_to_id = rm.id
-      WHERE (m.sender_id = ? AND m.recipient_id = ?)
-         OR (m.sender_id = ? AND m.recipient_id = ?)
+      WHERE ((m.sender_id = ? AND m.recipient_id = ?)
+         OR (m.sender_id = ? AND m.recipient_id = ?))
+         AND m.id NOT IN (SELECT message_id FROM deleted_messages WHERE user_id = ?)
       ORDER BY m.id ASC
-    `, [userId, contactId, contactId, userId]);
+    `, [userId, contactId, contactId, userId, userId]);
 
     // Load reactions for all messages
     const msgIds = messages.map(m => m.id);
@@ -602,18 +656,23 @@ io.on('connection', (socket) => {
       messages.forEach(m => { m.reactions = []; });
     }
 
-    socket.emit('privateHistory', { contactId, messages });
+    const u1 = Math.min(userId, contactId);
+    const u2 = Math.max(userId, contactId);
+    const pinned = await db.all('SELECT message_id FROM pinned_messages WHERE user1_id = ? AND user2_id = ? ORDER BY created_at ASC', [u1, u2]);
+    const pinnedMessageIds = pinned.map(p => p.message_id);
+
+    socket.emit('privateHistory', { contactId, messages, pinnedMessageIds });
   });
 
-  // Send message with optional reply
+  // Send message with optional reply and forward
   socket.on('sendPrivateMessage', async (msgData) => {
     const recipientId = Number(msgData.recipientId);
-    const { text, time, isE2ee = false, replyToId = null } = msgData;
+    const { text, time, isE2ee = false, replyToId = null, isForwarded = false } = msgData;
     if (!recipientId || !text) return;
 
     const result = await db.run(
-      'INSERT INTO messages (sender_id, recipient_id, text, time, is_e2ee, reply_to_id) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, recipientId, text, time, isE2ee ? 1 : 0, replyToId]
+      'INSERT INTO messages (sender_id, recipient_id, text, time, is_e2ee, reply_to_id, is_forwarded) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [userId, recipientId, text, time, isE2ee ? 1 : 0, replyToId, isForwarded ? 1 : 0]
     );
 
     const savedMsg = {
@@ -623,15 +682,21 @@ io.on('connection', (socket) => {
       text, time,
       is_e2ee: isE2ee,
       reply_to_id: replyToId,
+      is_forwarded: isForwarded,
+      is_edited: 0,
+      is_deleted_for_all: 0,
+      is_delivered: 0,
+      is_read: 0,
       senderName: socket.user.username,
       reactions: []
     };
 
     if (replyToId) {
-      const original = await db.get('SELECT text, sender_id FROM messages WHERE id = ?', [replyToId]);
+      const original = await db.get('SELECT text, sender_id, is_deleted_for_all FROM messages WHERE id = ?', [replyToId]);
       if (original) {
         savedMsg.reply_text = original.text;
         savedMsg.reply_sender_id = original.sender_id;
+        savedMsg.reply_is_deleted_for_all = original.is_deleted_for_all;
       }
     }
 
@@ -667,6 +732,63 @@ io.on('connection', (socket) => {
         io.to(`user_${msg.sender_id}`).to(`user_${msg.recipient_id}`).emit('reactionsUpdated', { messageId, reactions });
       }
     } catch (err) { console.error('removeReaction error:', err); }
+  });
+
+  socket.on('deleteMessageSelf', async (messageId) => {
+    try {
+      await db.run('INSERT OR IGNORE INTO deleted_messages (message_id, user_id) VALUES (?, ?)', [messageId, userId]);
+      socket.emit('messageDeletedSelf', messageId);
+    } catch (e) {}
+  });
+
+  socket.on('deleteMessageAll', async (messageId) => {
+    try {
+      const msg = await db.get('SELECT sender_id, recipient_id, time FROM messages WHERE id = ?', [messageId]);
+      if (msg && msg.sender_id === userId) {
+        const timeDiff = Date.now() - new Date(msg.time).getTime();
+        if (timeDiff <= 24 * 60 * 60 * 1000) {
+          await db.run('UPDATE messages SET is_deleted_for_all = 1 WHERE id = ?', [messageId]);
+          await db.run('DELETE FROM reactions WHERE message_id = ?', [messageId]);
+          io.to(`user_${msg.sender_id}`).to(`user_${msg.recipient_id}`).emit('messageDeletedAll', messageId);
+        }
+      }
+    } catch (e) {}
+  });
+
+  socket.on('editMessage', async ({ messageId, newText }) => {
+    try {
+      const msg = await db.get('SELECT sender_id, recipient_id, time FROM messages WHERE id = ?', [messageId]);
+      if (msg && msg.sender_id === userId) {
+        const timeDiff = Date.now() - new Date(msg.time).getTime();
+        if (timeDiff <= 24 * 60 * 60 * 1000) {
+          await db.run('UPDATE messages SET text = ?, is_edited = 1 WHERE id = ?', [newText, messageId]);
+          io.to(`user_${msg.sender_id}`).to(`user_${msg.recipient_id}`).emit('messageEdited', { messageId, text: newText });
+        }
+      }
+    } catch (e) {}
+  });
+
+  socket.on('pinMessage', async ({ messageId, contactId }) => {
+    try {
+      const u1 = Math.min(userId, contactId);
+      const u2 = Math.max(userId, contactId);
+      const pinned = await db.all('SELECT id, message_id FROM pinned_messages WHERE user1_id = ? AND user2_id = ? ORDER BY created_at ASC', [u1, u2]);
+      
+      if (!pinned.some(p => p.message_id === messageId)) {
+        if (pinned.length >= 3) {
+          await db.run('DELETE FROM pinned_messages WHERE id = ?', [pinned[0].id]);
+        }
+        await db.run('INSERT INTO pinned_messages (user1_id, user2_id, message_id) VALUES (?, ?, ?)', [u1, u2, messageId]);
+        io.to(`user_${userId}`).to(`user_${contactId}`).emit('messagePinned', { messageId, contactId: userId });
+      }
+    } catch (e) {}
+  });
+
+  socket.on('markAsRead', async (contactId) => {
+    try {
+      await db.run('UPDATE messages SET is_read = 1 WHERE sender_id = ? AND recipient_id = ? AND is_read = 0', [contactId, userId]);
+      io.to(`user_${contactId}`).emit('readUpdated', { contactId: userId });
+    } catch (e) {}
   });
 
   socket.on('disconnect', () => {

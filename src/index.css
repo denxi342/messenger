@@ -1706,3 +1706,87 @@ body, .msg-bubble, .contact-name, .contact-last-msg, .composer-input {
 :root.light-theme .profile-username-input {
   color: #000;
 }
+
+/* ========== NEW FEATURE STYLES ========== */
+
+/* Read/Delivered status colors */
+.msg-bubble__status.status-read { color: #4db8ff !important; }
+.msg-bubble__status.status-delivered { color: rgba(255,255,255,0.75) !important; }
+.msg-bubble__edited { font-size: 10px; color: rgba(255,255,255,0.45); margin-right: 4px; }
+
+/* Deleted message bubble */
+.msg-bubble.msg-deleted {
+  background: rgba(255,255,255,0.03) !important;
+  border: 1px dashed rgba(255,255,255,0.1) !important;
+  box-shadow: none !important;
+}
+.msg-bubble.msg-deleted .msg-bubble__text { color: var(--text-secondary); font-style: italic; }
+
+/* Forwarded indicator */
+.msg-forwarded-indicator {
+  font-size: 11px; color: var(--text-secondary);
+  padding: 0 4px 3px;
+  display: flex; align-items: center; gap: 4px;
+}
+.msg-forwarded-indicator--own { justify-content: flex-end; }
+
+/* Pinned bar */
+.pinned-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 20px; border-bottom: 1px solid var(--border);
+  background: rgba(107,76,255,0.07);
+  cursor: pointer; transition: background 0.2s;
+}
+.pinned-bar:hover { background: rgba(107,76,255,0.13); }
+.pinned-bar-icon { font-size: 13px; flex-shrink: 0; }
+.pinned-bar-content { flex: 1; min-width: 0; }
+.pinned-bar-label { display: block; font-size: 10px; font-weight: 600; color: var(--accent-hover); text-transform: uppercase; letter-spacing: 0.06em; }
+.pinned-bar-text { display: block; font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Search bar */
+.search-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px; border-bottom: 1px solid var(--border);
+  background: rgba(0,0,0,0.2);
+  animation: slideDown 0.18s ease;
+}
+.search-bar-input {
+  flex: 1; background: none; border: none; color: #fff;
+  font-size: 13px; outline: none;
+}
+.search-bar-input::placeholder { color: var(--text-secondary); }
+.search-bar-count { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.search-bar-nav {
+  background: none; border: none; color: var(--text-secondary);
+  width: 26px; height: 26px; border-radius: 6px;
+  display: flex; justify-content: center; align-items: center;
+  font-size: 13px; transition: 0.15s; cursor: pointer;
+}
+.search-bar-nav:hover:not(:disabled) { color: #fff; background: var(--bg-hover); }
+.search-bar-nav:disabled { opacity: 0.3; cursor: not-allowed; }
+.search-bar-close {
+  background: none; border: none; color: var(--text-secondary);
+  font-size: 12px; width: 24px; height: 24px;
+  border-radius: 50%; display: flex; justify-content: center; align-items: center;
+  transition: 0.15s; cursor: pointer;
+}
+.search-bar-close:hover { color: #fff; background: rgba(255,255,255,0.1); }
+
+/* Search highlight in messages */
+.search-highlight {
+  background: rgba(255,221,0,0.3);
+  color: #fff;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.msg-search-active .msg-bubble {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px;
+}
+
+/* Header divider */
+.header-divider {
+  width: 1px; height: 18px; background: var(--border);
+  display: inline-block;
+}
+

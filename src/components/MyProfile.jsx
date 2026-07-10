@@ -39,6 +39,11 @@ const MyProfile = ({ user, token, onClose, onLogout, onProfileUpdate, onUserUpda
         if (p.avatar_base64) setAvatarPreview(p.avatar_base64);
       })
       .catch(err => {
+        if (err.message === 'AUTH_FAILED') {
+          // If the token is invalid, expired, or the user was deleted (e.g. SQLite database wiped on Render), log them out immediately to prevent soft-locks.
+          onLogout();
+          return;
+        }
         // Network / server errors must NOT log the user out.
         // A temporary connectivity issue (Render cold start, etc.) is not an auth failure.
         console.error('fetchMyProfile failed:', err);
