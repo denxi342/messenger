@@ -25,10 +25,10 @@ const corsOptions = {
     if (process.env.FRONTEND_URL) {
       allowedOrigins.push(process.env.FRONTEND_URL);
     }
-    
+
     // Разрешаем запросы без origin (например, из Electron, curl)
     if (!origin) return callback(null, true);
-    
+
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -208,7 +208,7 @@ const auth = (req, res, next) => {
   try {
     req.user = jwt.verify(token, JWT_SECRET);
     req.token = token;
-    db.run('UPDATE sessions SET last_active = CURRENT_TIMESTAMP WHERE token = ?', [token]).catch(() => {});
+    db.run('UPDATE sessions SET last_active = CURRENT_TIMESTAMP WHERE token = ?', [token]).catch(() => { });
     next();
   } catch {
     res.status(401).json({ error: 'Invalid token' });
@@ -302,11 +302,11 @@ app.patch(['/profile', '/api/profile'], auth, async (req, res) => {
   );
   await broadcastProfileUpdate(req.user.userId);
   const user = await db.get('SELECT id, username, display_name, bio, avatar_base64, created_at FROM users WHERE id = ?', [req.user.userId]);
-  
+
   // Generate a new token and update the current session
   const newToken = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
   await db.run('UPDATE sessions SET token = ? WHERE token = ?', [newToken, req.token]);
-  
+
   res.json({ ...user, token: newToken });
 });
 
