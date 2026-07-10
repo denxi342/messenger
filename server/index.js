@@ -35,7 +35,8 @@ const corsOptions = {
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      // Возвращаем false вместо Error, чтобы не засорять логи сервера
+      callback(null, false);
     }
   },
   credentials: true
