@@ -159,7 +159,7 @@ const ContactProfile = ({ contact, token, onlineUsers, onClose, onOpenChat, onCo
                     <div className="file-list-item">
                       <span className="file-icon">📦</span>
                       <div className="file-details">
-                        <span className="file-name">messenger-build-win.zip</span>
+                        <span className="file-name">octave-build-win.zip</span>
                         <span className="file-size">48.9 MB</span>
                       </div>
                     </div>

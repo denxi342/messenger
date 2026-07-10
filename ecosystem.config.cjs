@@ -1,6 +1,6 @@
 module.exports = {
   apps: [{
-    name: "messenger-backend",
+    name: "octave-backend",
     script: "./server/index.js",
     watch: false,
     env: {

@@ -6,7 +6,17 @@ function App() {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('messenger_user');
+    let savedUser = localStorage.getItem('octave_user');
+    if (!savedUser) {
+      // Migration from old app name
+      const legacyUser = localStorage.getItem('messenger_user');
+      if (legacyUser) {
+        savedUser = legacyUser;
+        localStorage.setItem('octave_user', legacyUser);
+        localStorage.removeItem('messenger_user');
+      }
+    }
+
     if (savedUser) {
       setUser(JSON.parse(savedUser));
     }
@@ -14,18 +24,18 @@ function App() {
 
   const handleLogin = (userData) => {
     setUser(userData);
-    localStorage.setItem('messenger_user', JSON.stringify(userData));
+    localStorage.setItem('octave_user', JSON.stringify(userData));
   };
 
   const handleLogout = () => {
     setUser(null);
-    localStorage.removeItem('messenger_user');
+    localStorage.removeItem('octave_user');
   };
 
   const handleUserUpdate = (newUserData) => {
     const updated = { ...user, ...newUserData };
     setUser(updated);
-    localStorage.setItem('messenger_user', JSON.stringify(updated));
+    localStorage.setItem('octave_user', JSON.stringify(updated));
   };
 
   if (!user) {

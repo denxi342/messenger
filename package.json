@@ -1,8 +1,8 @@
 {
-  "name": "messenger-app",
+  "name": "octave-app",
   "private": true,
   "version": "1.0.0",
-  "description": "Messenger Application",
+  "description": "Octave Application",
   "author": "Denxi",
   "type": "module",
   "main": "main.cjs",
@@ -14,8 +14,8 @@
     "preview": "vite preview"
   },
   "build": {
-    "appId": "com.messenger.app",
-    "productName": "Messenger",
+    "appId": "com.octave.app",
+    "productName": "Octave",
     "directories": {
       "output": "release"
     },

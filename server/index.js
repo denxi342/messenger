@@ -400,11 +400,25 @@ app.delete('/api/blocked/:userId', auth, async (req, res) => {
 app.get(['/search-contact', '/api/search-contact'], auth, async (req, res) => {
   const { username } = req.query;
   if (!username) return res.json(null);
-  if (username === req.user.username) return res.status(400).json({ error: 'Нельзя добавить себя' });
-  const user = await db.get('SELECT id, username, display_name, avatar_base64 FROM users WHERE username = ?', [username]);
+
+  // Try exact match first
+  let user = await db.get('SELECT id, username, display_name, avatar_base64 FROM users WHERE username = ?', [username]);
+
+  // Fallback to case-insensitive match if exact match fails
+  if (!user) {
+    user = await db.get('SELECT id, username, display_name, avatar_base64 FROM users WHERE LOWER(username) = LOWER(?)', [username]);
+  }
+
   if (!user) return res.json(null);
+
+  // Robust check to prevent adding oneself using DB user ID
+  if (user.id === req.user.userId) {
+    return res.status(400).json({ error: 'Нельзя добавить себя' });
+  }
+
   res.json(user);
 });
+
 
 app.post(['/add-contact', '/api/add-contact'], auth, async (req, res) => {
   const { contactId } = req.body;
@@ -602,6 +616,11 @@ io.on('connection', (socket) => {
   });
 });
 
+// --- HEALTH CHECK (public, no auth) — used by self-ping and external monitors ---
+app.get(['/health', '/api/health'], (_req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() });
+});
+
 // --- CATCH-ALL: ensure every unmatched route returns JSON, never HTML ---
 app.use((req, res) => {
   res.status(404).json({ error: `Cannot ${req.method} ${req.path}` });
@@ -615,7 +634,30 @@ app.use((err, req, res, _next) => {
 });
 
 initDB().then(() => {
-  server.listen(process.env.PORT || 3001);
+  const PORT = process.env.PORT || 3001;
+  server.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT}`);
+
+    // --- KEEP-ALIVE SELF-PING ---
+    // Render free tier spins down after 15 min of inactivity.
+    // We ping our own /health every 10 minutes so the dyno never sleeps.
+    // Only runs when the RENDER environment variable is set (i.e. on Render, not locally).
+    if (process.env.RENDER) {
+      const SELF_URL = process.env.RENDER_EXTERNAL_URL
+        ? `${process.env.RENDER_EXTERNAL_URL}/health`
+        : `http://localhost:${PORT}/health`;
+
+      const PING_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+
+      setInterval(() => {
+        fetch(SELF_URL)
+          .then(r => console.log(`[keep-alive] ping OK — ${r.status}`))
+          .catch(err => console.warn('[keep-alive] ping failed:', err.message));
+      }, PING_INTERVAL_MS);
+
+      console.log(`[keep-alive] Self-ping active → ${SELF_URL} every 10 min`);
+    }
+  });
 }).catch(() => process.exit(1));
 
 

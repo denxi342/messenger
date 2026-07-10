@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Builds and temp files
+release/
+server/automate*.js
+server/debug*.js
+server/verify*.js
+server/db_check*.js
+server/test_api*.js
+server/database.sqlite

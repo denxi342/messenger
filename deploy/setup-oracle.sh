@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Starting Oracle Cloud Messenger Deployment..."
+echo "Starting Oracle Cloud octave Deployment..."
 
 # 1. Update and install dependencies
 sudo apt update
@@ -38,15 +38,15 @@ echo "Building React frontend..."
 npm run build
 
 # 7. Move to Nginx directory
-echo "Deploying frontend to /var/www/messenger..."
-sudo mkdir -p /var/www/messenger
-sudo cp -r dist /var/www/messenger/
-sudo chown -R www-data:www-data /var/www/messenger
+echo "Deploying frontend to /var/www/octave..."
+sudo mkdir -p /var/www/octave
+sudo cp -r dist /var/www/octave/
+sudo chown -R www-data:www-data /var/www/octave
 
 # 8. Configure Nginx
 echo "Configuring Nginx..."
-sudo cp deploy/nginx.conf /etc/nginx/sites-available/messenger
-sudo ln -sf /etc/nginx/sites-available/messenger /etc/nginx/sites-enabled/
+sudo cp deploy/nginx.conf /etc/nginx/sites-available/octave
+sudo ln -sf /etc/nginx/sites-available/octave /etc/nginx/sites-enabled/
 # Remove default nginx config to prevent conflicts
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo systemctl restart nginx
@@ -64,7 +64,7 @@ pm2 save
 echo ""
 echo "================================================="
 echo "✅ Deployment Successful!"
-echo "The messenger application is now running on your server's public IP address."
+echo "The octave application is now running on your server's public IP address."
 echo ""
 echo "To enable HTTPS later, point your domain name to this server's IP address,"
 echo "and then run the following command:"

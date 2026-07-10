@@ -21,11 +21,15 @@ const MyProfile = ({ user, token, onClose, onLogout, onProfileUpdate, onUserUpda
   const [cropModal, setCropModal] = useState(false);
   const fileRef = useRef(null);
 
+  const [fetchError, setFetchError] = useState(false);
+
   useEffect(() => {
     fetchMyProfile(token)
       .then(p => {
         if (!p) {
-          onLogout();
+          // Profile returned null — server issue, NOT a logout trigger.
+          // Show a retry error state instead of forcefully logging the user out.
+          setFetchError(true);
           return;
         }
         setProfile(p);
@@ -35,10 +39,15 @@ const MyProfile = ({ user, token, onClose, onLogout, onProfileUpdate, onUserUpda
         if (p.avatar_base64) setAvatarPreview(p.avatar_base64);
       })
       .catch(err => {
-        console.error(err);
-        onLogout();
+        // Network / server errors must NOT log the user out.
+        // A temporary connectivity issue (Render cold start, etc.) is not an auth failure.
+        console.error('fetchMyProfile failed:', err);
+        setFetchError(true);
       });
-  }, [token, onLogout]);
+  // token is stable — run once on mount. onLogout is intentionally excluded
+  // to prevent the effect from re-running when the parent re-renders.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const showSaved = (msg = 'Сохранено ✓') => {
     setSaveStatus(msg);
@@ -107,6 +116,14 @@ const MyProfile = ({ user, token, onClose, onLogout, onProfileUpdate, onUserUpda
     return new Date(dt).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
   };
 
+  if (fetchError) return (
+    <div className="settings-container" onClick={e => e.stopPropagation()}>
+      <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-secondary)' }}>
+        <p>Не удалось загрузить профиль.</p>
+        <button onClick={() => { setFetchError(false); fetchMyProfile(token).then(p => { if (p) { setProfile(p); setDisplayName(p.display_name || p.username); setUsername(p.username); setBio(p.bio || ''); if (p.avatar_base64) setAvatarPreview(p.avatar_base64); } }).catch(console.error); }}>Повторить</button>
+      </div>
+    </div>
+  );
   if (!profile) return null;
 
   const profileComponent = (

@@ -309,7 +309,7 @@ const Settings = ({ token, user, onClose, profileComponent, securityComponent, s
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ user, settings: currentSettings }, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `messenger_data_${user?.username || 'user'}.json`);
+    downloadAnchor.setAttribute("download", `octave_data_${user?.username || 'user'}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
