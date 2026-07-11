@@ -256,7 +256,8 @@ async function initDB() {
     'ALTER TABLE messages ADD COLUMN is_deleted_for_all BOOLEAN DEFAULT 0;',
     'ALTER TABLE messages ADD COLUMN is_edited BOOLEAN DEFAULT 0;',
     'ALTER TABLE messages ADD COLUMN is_forwarded BOOLEAN DEFAULT 0;',
-    'ALTER TABLE messages ADD COLUMN is_delivered BOOLEAN DEFAULT 0;'
+    'ALTER TABLE messages ADD COLUMN is_delivered BOOLEAN DEFAULT 0;',
+    'ALTER TABLE messages ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP;'
   ];
 
   for (const sql of migrations) {
@@ -670,9 +671,10 @@ io.on('connection', (socket) => {
     const { text, time, isE2ee = false, replyToId = null, isForwarded = false } = msgData;
     if (!recipientId || !text) return;
 
+    const nowISO = new Date().toISOString();
     const result = await db.run(
-      'INSERT INTO messages (sender_id, recipient_id, text, time, is_e2ee, reply_to_id, is_forwarded) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [userId, recipientId, text, time, isE2ee ? 1 : 0, replyToId, isForwarded ? 1 : 0]
+      'INSERT INTO messages (sender_id, recipient_id, text, time, is_e2ee, reply_to_id, is_forwarded, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [userId, recipientId, text, time, isE2ee ? 1 : 0, replyToId, isForwarded ? 1 : 0, nowISO]
     );
 
     const savedMsg = {
@@ -680,6 +682,7 @@ io.on('connection', (socket) => {
       sender_id: userId,
       recipient_id: recipientId,
       text, time,
+      created_at: nowISO,
       is_e2ee: isE2ee,
       reply_to_id: replyToId,
       is_forwarded: isForwarded,
@@ -736,36 +739,92 @@ io.on('connection', (socket) => {
 
   socket.on('deleteMessageSelf', async (messageId) => {
     try {
-      await db.run('INSERT OR IGNORE INTO deleted_messages (message_id, user_id) VALUES (?, ?)', [messageId, userId]);
-      socket.emit('messageDeletedSelf', messageId);
-    } catch (e) {}
+      const id = Number(messageId);
+      console.log(`[deleteMessageSelf] userId=${userId} messageId=${id}`);
+      await db.run('INSERT OR IGNORE INTO deleted_messages (message_id, user_id) VALUES (?, ?)', [id, userId]);
+      socket.emit('messageDeletedSelf', id);
+      console.log(`[deleteMessageSelf] OK`);
+    } catch (e) { console.error('[deleteMessageSelf] error:', e); }
   });
 
   socket.on('deleteMessageAll', async (messageId) => {
     try {
-      const msg = await db.get('SELECT sender_id, recipient_id, time FROM messages WHERE id = ?', [messageId]);
-      if (msg && msg.sender_id === userId) {
-        const timeDiff = Date.now() - new Date(msg.time).getTime();
-        if (timeDiff <= 24 * 60 * 60 * 1000) {
-          await db.run('UPDATE messages SET is_deleted_for_all = 1 WHERE id = ?', [messageId]);
-          await db.run('DELETE FROM reactions WHERE message_id = ?', [messageId]);
-          io.to(`user_${msg.sender_id}`).to(`user_${msg.recipient_id}`).emit('messageDeletedAll', messageId);
-        }
+      const id = Number(messageId);
+      console.log(`[deleteMessageAll] userId=${userId} messageId=${id}`);
+
+      const msg = await db.get('SELECT sender_id, recipient_id, created_at FROM messages WHERE id = ?', [id]);
+      console.log(`[deleteMessageAll] msg=`, msg);
+
+      if (!msg) {
+        console.log(`[deleteMessageAll] REJECT: message not found`);
+        return;
       }
-    } catch (e) {}
+
+      if (Number(msg.sender_id) !== Number(userId)) {
+        console.log(`[deleteMessageAll] REJECT: not owner. msg.sender_id=${msg.sender_id} userId=${userId}`);
+        return;
+      }
+
+      // 24h check — use created_at if available, otherwise allow (legacy messages)
+      if (msg.created_at) {
+        const timeDiff = Date.now() - new Date(msg.created_at).getTime();
+        console.log(`[deleteMessageAll] timeDiff=${Math.round(timeDiff/1000)}s, limit=${24*3600}s`);
+        if (timeDiff > 24 * 60 * 60 * 1000) {
+          console.log(`[deleteMessageAll] REJECT: older than 24h`);
+          socket.emit('actionError', { event: 'deleteMessageAll', reason: 'Message is older than 24 hours' });
+          return;
+        }
+      } else {
+        console.log(`[deleteMessageAll] no created_at — skipping 24h check for legacy message`);
+      }
+
+      await db.run('UPDATE messages SET is_deleted_for_all = 1 WHERE id = ?', [id]);
+      await db.run('DELETE FROM reactions WHERE message_id = ?', [id]);
+      console.log(`[deleteMessageAll] DB updated, broadcasting to user_${msg.sender_id} and user_${msg.recipient_id}`);
+      io.to(`user_${msg.sender_id}`).to(`user_${msg.recipient_id}`).emit('messageDeletedAll', id);
+    } catch (e) { console.error('[deleteMessageAll] error:', e); }
   });
 
   socket.on('editMessage', async ({ messageId, newText }) => {
     try {
-      const msg = await db.get('SELECT sender_id, recipient_id, time FROM messages WHERE id = ?', [messageId]);
-      if (msg && msg.sender_id === userId) {
-        const timeDiff = Date.now() - new Date(msg.time).getTime();
-        if (timeDiff <= 24 * 60 * 60 * 1000) {
-          await db.run('UPDATE messages SET text = ?, is_edited = 1 WHERE id = ?', [newText, messageId]);
-          io.to(`user_${msg.sender_id}`).to(`user_${msg.recipient_id}`).emit('messageEdited', { messageId, text: newText });
-        }
+      const id = Number(messageId);
+      console.log(`[editMessage] userId=${userId} messageId=${id} newText="${newText}"`);
+
+      if (!newText || !newText.trim()) {
+        console.log(`[editMessage] REJECT: empty text`);
+        return;
       }
-    } catch (e) {}
+
+      const msg = await db.get('SELECT sender_id, recipient_id, created_at FROM messages WHERE id = ?', [id]);
+      console.log(`[editMessage] msg=`, msg);
+
+      if (!msg) {
+        console.log(`[editMessage] REJECT: message not found`);
+        return;
+      }
+
+      if (Number(msg.sender_id) !== Number(userId)) {
+        console.log(`[editMessage] REJECT: not owner. msg.sender_id=${msg.sender_id} userId=${userId}`);
+        return;
+      }
+
+      // 24h check — use created_at if available, otherwise allow (legacy messages)
+      if (msg.created_at) {
+        const timeDiff = Date.now() - new Date(msg.created_at).getTime();
+        console.log(`[editMessage] timeDiff=${Math.round(timeDiff/1000)}s`);
+        if (timeDiff > 24 * 60 * 60 * 1000) {
+          console.log(`[editMessage] REJECT: older than 24h`);
+          socket.emit('actionError', { event: 'editMessage', reason: 'Message is older than 24 hours' });
+          return;
+        }
+      } else {
+        console.log(`[editMessage] no created_at — skipping 24h check for legacy message`);
+      }
+
+      await db.run('UPDATE messages SET text = ?, is_edited = 1 WHERE id = ?', [newText.trim(), id]);
+      console.log(`[editMessage] DB updated, broadcasting`);
+      io.to(`user_${msg.sender_id}`).to(`user_${msg.recipient_id}`).emit('messageEdited', { messageId: id, text: newText.trim() });
+    } catch (e) { console.error('[editMessage] error:', e); }
   });
 
   socket.on('pinMessage', async ({ messageId, contactId }) => {

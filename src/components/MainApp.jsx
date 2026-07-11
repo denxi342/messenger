@@ -148,6 +148,16 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
     });
 
     // Real-time message state updates
+    socketRef.current.on('messageDeletedSelf', (messageId) => {
+      setMessagesData(prev => {
+        const updated = {};
+        Object.entries(prev).forEach(([cid, msgs]) => {
+          updated[cid] = msgs.filter(m => m.id !== messageId);
+        });
+        return updated;
+      });
+    });
+
     socketRef.current.on('messageDeletedAll', (messageId) => {
       setMessagesData(prev => {
         const updated = {};
@@ -178,6 +188,10 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
           return { ...prev, [cid]: newPinned };
         });
       }
+    });
+
+    socketRef.current.on('actionError', ({ event, reason }) => {
+      alert(`Ошибка: ${reason}`);
     });
 
     socketRef.current.on('typing', ({ userId, isTyping }) => {

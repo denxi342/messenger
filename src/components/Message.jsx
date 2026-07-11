@@ -4,12 +4,16 @@ const EMOJI_QUICK = ['👍', '❤️', '😂', '😮', '😢', '🔥', '🎉', '
 
 function highlightText(text, query) {
   if (!query || !query.trim()) return text;
-  const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
-  return parts.map((part, i) =>
-    part.toLowerCase() === query.toLowerCase()
-      ? <mark key={i} className="search-highlight">{part}</mark>
-      : part
-  );
+  try {
+    const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
+    return parts.map((part, i) =>
+      part.toLowerCase() === query.toLowerCase()
+        ? <mark key={i} className="search-highlight">{part}</mark>
+        : part
+    );
+  } catch {
+    return text;
+  }
 }
 
 function ReactionBar({ reactions, currentUserId, messageId, onToggle }) {
@@ -78,17 +82,24 @@ export default function Message({
   const msgReactions = localReactions[msg.id] || [];
   const hasReply = msg.reply_to_id && (msg.reply_text || msg.reply_is_deleted_for_all);
 
+  // SQLite returns 0/1 as integers — convert to booleans explicitly
+  const isDeletedForAll = Number(msg.is_deleted_for_all) === 1;
+  const isEdited = Number(msg.is_edited) === 1;
+  const isForwarded = Number(msg.is_forwarded) === 1;
+  const isRead = Number(msg.is_read) === 1;
+  const isDelivered = Number(msg.is_delivered) === 1;
+
   return (
     <div
       className={`msg-bubble-wrap ${isHighlighted ? 'msg-search-active' : ''}`}
       ref={el => { if (el) msgRefs.current[msg.id] = el; }}
     >
       {/* Forwarded indicator */}
-      {msg.is_forwarded ? (
+      {isForwarded && (
         <div className={`msg-forwarded-indicator ${isOwn ? 'msg-forwarded-indicator--own' : ''}`}>
           <span>↗ Переслано</span>
         </div>
-      ) : null}
+      )}
 
       {/* Reply quote */}
       {hasReply && (
@@ -97,14 +108,14 @@ export default function Message({
           replySenderId={msg.reply_sender_id}
           currentUserId={currentUser.userId}
           contactName={contactName}
-          isDeleted={!!msg.reply_is_deleted_for_all}
+          isDeleted={Number(msg.reply_is_deleted_for_all) === 1}
           onClick={() => scrollToMsg(msg.reply_to_id)}
         />
       )}
 
       <div className="msg-bubble-row">
-        {/* Quick react (hover) - hidden for deleted messages */}
-        {!msg.is_deleted_for_all && (
+        {/* Quick react — hidden for deleted messages */}
+        {!isDeletedForAll && (
           <div className={`quick-react ${isOwn ? 'quick-react--left' : 'quick-react--right'}`}>
             {EMOJI_QUICK.map(emoji => (
               <button key={emoji} className="quick-react-btn" onClick={() => handleQuickReact(msg, emoji)}>
@@ -115,33 +126,33 @@ export default function Message({
         )}
 
         <div
-          className={`msg-bubble ${isOwn ? 'msg-bubble--own' : 'msg-bubble--other'} ${posClass} msg-bubble--${settings?.bubbleStyle || 'rounded'} ${msg.is_deleted_for_all ? 'msg-deleted' : ''}`}
+          className={`msg-bubble ${isOwn ? 'msg-bubble--own' : 'msg-bubble--other'} ${posClass} msg-bubble--${settings?.bubbleStyle || 'rounded'} ${isDeletedForAll ? 'msg-deleted' : ''}`}
           onContextMenu={e => handleContextMenu(e, msg)}
         >
           <span className="msg-bubble__text">
-            {msg.is_deleted_for_all
+            {isDeletedForAll
               ? <i style={{ opacity: 0.7 }}>Сообщение удалено</i>
               : highlightText(msg.text || '', searchQuery)
             }
           </span>
           <span className="msg-bubble__meta">
-            {msg.is_edited && !msg.is_deleted_for_all && (
+            {isEdited && !isDeletedForAll && (
               <span className="msg-bubble__edited">(изменено)</span>
             )}
             <span className="msg-bubble__time">{msg.time}</span>
             {isOwn && (
               <span
-                className={`msg-bubble__status ${msg.is_read ? 'status-read' : msg.is_delivered ? 'status-delivered' : ''}`}
-                title={msg.is_read ? 'Прочитано' : msg.is_delivered ? 'Доставлено' : 'Отправлено'}
+                className={`msg-bubble__status ${isRead ? 'status-read' : isDelivered ? 'status-delivered' : ''}`}
+                title={isRead ? 'Прочитано' : isDelivered ? 'Доставлено' : 'Отправлено'}
               >
-                {msg.is_read ? '✓✓' : msg.is_delivered ? '✓✓' : '✓'}
+                {isRead ? '✓✓' : isDelivered ? '✓✓' : '✓'}
               </span>
             )}
           </span>
         </div>
 
         {/* Reply button */}
-        {!msg.is_deleted_for_all && (
+        {!isDeletedForAll && (
           <button
             className="msg-action-btn msg-reply-btn"
             title="Ответить"
@@ -155,7 +166,7 @@ export default function Message({
       </div>
 
       {/* Reactions bar */}
-      {!msg.is_deleted_for_all && (
+      {!isDeletedForAll && (
         <ReactionBar
           reactions={msgReactions}
           currentUserId={currentUser.userId}
