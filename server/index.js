@@ -737,8 +737,20 @@ io.on('connection', (socket) => {
     } catch (err) { console.error('removeReaction error:', err); }
   });
 
-  socket.on('deleteMessageSelf', async (messageId) => {
+  const parseSqliteDate = (str) => {
+    if (!str) return null;
+    if (typeof str === 'string') {
+      if (str.endsWith('Z') || str.includes('+') || str.includes('T')) {
+        return new Date(str);
+      }
+      return new Date(str.replace(' ', 'T') + 'Z');
+    }
+    return new Date(str);
+  };
+
+  socket.on('deleteMessageSelf', async (payload) => {
     try {
+      const messageId = (payload && typeof payload === 'object') ? payload.messageId : payload;
       const id = Number(messageId);
       console.log(`[deleteMessageSelf] userId=${userId} messageId=${id}`);
       await db.run('INSERT OR IGNORE INTO deleted_messages (message_id, user_id) VALUES (?, ?)', [id, userId]);
@@ -747,8 +759,9 @@ io.on('connection', (socket) => {
     } catch (e) { console.error('[deleteMessageSelf] error:', e); }
   });
 
-  socket.on('deleteMessageAll', async (messageId) => {
+  socket.on('deleteMessageAll', async (payload) => {
     try {
+      const messageId = (payload && typeof payload === 'object') ? payload.messageId : payload;
       const id = Number(messageId);
       console.log(`[deleteMessageAll] userId=${userId} messageId=${id}`);
 
@@ -765,10 +778,10 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // 24h check — use created_at if available, otherwise allow (legacy messages)
       if (msg.created_at) {
-        const timeDiff = Date.now() - new Date(msg.created_at).getTime();
-        console.log(`[deleteMessageAll] timeDiff=${Math.round(timeDiff/1000)}s, limit=${24*3600}s`);
+        const createdDate = parseSqliteDate(msg.created_at);
+        const timeDiff = Date.now() - createdDate.getTime();
+        console.log(`[deleteMessageAll] createdDate=${createdDate.toISOString()} timeDiff=${Math.round(timeDiff/1000)}s, limit=${24*3600}s`);
         if (timeDiff > 24 * 60 * 60 * 1000) {
           console.log(`[deleteMessageAll] REJECT: older than 24h`);
           socket.emit('actionError', { event: 'deleteMessageAll', reason: 'Message is older than 24 hours' });
@@ -785,8 +798,13 @@ io.on('connection', (socket) => {
     } catch (e) { console.error('[deleteMessageAll] error:', e); }
   });
 
-  socket.on('editMessage', async ({ messageId, newText }) => {
+  socket.on('editMessage', async (payload) => {
     try {
+      if (!payload || typeof payload !== 'object') {
+        console.log(`[editMessage] REJECT: invalid payload`);
+        return;
+      }
+      const { messageId, newText } = payload;
       const id = Number(messageId);
       console.log(`[editMessage] userId=${userId} messageId=${id} newText="${newText}"`);
 
@@ -808,10 +826,10 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // 24h check — use created_at if available, otherwise allow (legacy messages)
       if (msg.created_at) {
-        const timeDiff = Date.now() - new Date(msg.created_at).getTime();
-        console.log(`[editMessage] timeDiff=${Math.round(timeDiff/1000)}s`);
+        const createdDate = parseSqliteDate(msg.created_at);
+        const timeDiff = Date.now() - createdDate.getTime();
+        console.log(`[editMessage] createdDate=${createdDate.toISOString()} timeDiff=${Math.round(timeDiff/1000)}s`);
         if (timeDiff > 24 * 60 * 60 * 1000) {
           console.log(`[editMessage] REJECT: older than 24h`);
           socket.emit('actionError', { event: 'editMessage', reason: 'Message is older than 24 hours' });

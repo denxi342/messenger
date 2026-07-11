@@ -371,12 +371,12 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
 
   const handleDeleteSelf = (msgId) => {
     if (!socket) return;
-    socket.emit('deleteMessageSelf', msgId);
+    socket.emit('deleteMessageSelf', { messageId: msgId });
   };
 
   const handleDeleteAll = (msgId) => {
     if (!socket) return;
-    socket.emit('deleteMessageAll', msgId);
+    socket.emit('deleteMessageAll', { messageId: msgId });
   };
 
   const handleEditSave = (msgId, newText) => {
