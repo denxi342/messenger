@@ -205,6 +205,7 @@ async function initDB() {
       recipient_id INTEGER,
       text TEXT NOT NULL,
       time TEXT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       is_read BOOLEAN DEFAULT 0,
       is_e2ee BOOLEAN DEFAULT 0,
       reply_to_id INTEGER DEFAULT NULL,
@@ -251,22 +252,46 @@ async function initDB() {
     );
   `);
 
-  // Run migrations for existing databases to add new columns safely
-  const migrations = [
-    'ALTER TABLE messages ADD COLUMN is_deleted_for_all BOOLEAN DEFAULT 0;',
-    'ALTER TABLE messages ADD COLUMN is_edited BOOLEAN DEFAULT 0;',
-    'ALTER TABLE messages ADD COLUMN is_forwarded BOOLEAN DEFAULT 0;',
-    'ALTER TABLE messages ADD COLUMN is_delivered BOOLEAN DEFAULT 0;',
-    'ALTER TABLE messages ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP;'
+  // Compatibility migration for databases created before the message metadata
+  // columns existed. Do not use "ADD COLUMN ... DEFAULT CURRENT_TIMESTAMP" here:
+  // SQLite/LibSQL rejects non-constant defaults when adding a column to a table
+  // that already has rows. New databases receive the default in CREATE TABLE;
+  // legacy databases receive a nullable column and the application writes the
+  // timestamp explicitly on every new insert.
+  const messageColumns = new Set(
+    (await db.all("PRAGMA table_info('messages')")).map((column) => column.name)
+  );
+  const additiveColumns = [
+    ['is_deleted_for_all', 'ALTER TABLE messages ADD COLUMN is_deleted_for_all BOOLEAN DEFAULT 0'],
+    ['is_edited', 'ALTER TABLE messages ADD COLUMN is_edited BOOLEAN DEFAULT 0'],
+    ['is_forwarded', 'ALTER TABLE messages ADD COLUMN is_forwarded BOOLEAN DEFAULT 0'],
+    ['is_delivered', 'ALTER TABLE messages ADD COLUMN is_delivered BOOLEAN DEFAULT 0'],
+    ['created_at', 'ALTER TABLE messages ADD COLUMN created_at DATETIME']
   ];
 
-  for (const sql of migrations) {
+  for (const [column, sql] of additiveColumns) {
+    if (messageColumns.has(column)) continue;
     try {
       await db.exec(sql);
-    } catch (e) {
-      // Ignore errors if columns already exist
+      console.info(`[DB] Added messages.${column}`);
+      messageColumns.add(column);
+    } catch (error) {
+      console.error(`[DB] Failed to add required messages.${column}`, error);
+      throw error;
     }
   }
+
+  // Existing rows have only a display-time value (HH:mm), so their original
+  // chronological timestamp cannot be reconstructed. Stamp the migration time
+  // rather than inventing a false message date; new rows use DB UTC time.
+  await db.run(
+    'UPDATE messages SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL'
+  );
+
+  // The private-history query is a two-way conversation lookup. Both indexes
+  // allow LibSQL to serve the OR branches without a full messages-table scan.
+  await db.exec('CREATE INDEX IF NOT EXISTS idx_messages_sender_recipient_created_at ON messages (sender_id, recipient_id, created_at, id)');
+  await db.exec('CREATE INDEX IF NOT EXISTS idx_messages_recipient_sender_created_at ON messages (recipient_id, sender_id, created_at, id)');
 }
 
 // Auth Middleware
@@ -636,7 +661,7 @@ io.on('connection', (socket) => {
       WHERE ((m.sender_id = ? AND m.recipient_id = ?)
          OR (m.sender_id = ? AND m.recipient_id = ?))
          AND m.id NOT IN (SELECT message_id FROM deleted_messages WHERE user_id = ?)
-      ORDER BY m.id ASC
+      ORDER BY m.created_at ASC, m.id ASC
     `, [userId, contactId, contactId, userId, userId]);
 
     // Load reactions for all messages
@@ -669,43 +694,65 @@ io.on('connection', (socket) => {
   socket.on('sendPrivateMessage', async (msgData) => {
     const recipientId = Number(msgData.recipientId);
     const { text, time, isE2ee = false, replyToId = null, isForwarded = false } = msgData;
-    if (!recipientId || !text) return;
+    if (!recipientId || typeof text !== 'string' || !text.trim()) return;
 
-    const nowISO = new Date().toISOString();
-    const result = await db.run(
-      'INSERT INTO messages (sender_id, recipient_id, text, time, is_e2ee, reply_to_id, is_forwarded, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [userId, recipientId, text, time, isE2ee ? 1 : 0, replyToId, isForwarded ? 1 : 0, nowISO]
-    );
-
-    const savedMsg = {
-      id: result.lastID,
-      sender_id: userId,
-      recipient_id: recipientId,
-      text, time,
-      created_at: nowISO,
-      is_e2ee: isE2ee,
-      reply_to_id: replyToId,
-      is_forwarded: isForwarded,
-      is_edited: 0,
-      is_deleted_for_all: 0,
-      is_delivered: 0,
-      is_read: 0,
-      senderName: socket.user.username,
-      reactions: []
-    };
-
-    if (replyToId) {
-      const original = await db.get('SELECT text, sender_id, is_deleted_for_all FROM messages WHERE id = ?', [replyToId]);
-      if (original) {
-        savedMsg.reply_text = original.text;
-        savedMsg.reply_sender_id = original.sender_id;
-        savedMsg.reply_is_deleted_for_all = original.is_deleted_for_all;
+    try {
+      // Explicitly use the database clock. This also works for legacy Turso
+      // databases where created_at was added without a DEFAULT expression.
+      const result = await db.run(
+        `INSERT INTO messages
+          (sender_id, recipient_id, text, time, is_e2ee, reply_to_id, is_forwarded, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [userId, recipientId, text.trim(), time, isE2ee ? 1 : 0, replyToId, isForwarded ? 1 : 0]
+      );
+      const persisted = await db.get(
+        'SELECT id, created_at FROM messages WHERE id = ?',
+        [result.lastID]
+      );
+      if (!persisted?.created_at) {
+        throw new Error(`Message ${result.lastID} was inserted without created_at`);
       }
-    }
 
-    console.log(`[MSG] ${socket.user.username} -> user_${recipientId}: "${text}"`);
-    socket.to(`user_${recipientId}`).emit('newPrivateMessage', savedMsg);
-    socket.emit('newPrivateMessage', savedMsg);
+      const savedMsg = {
+        id: result.lastID,
+        sender_id: userId,
+        recipient_id: recipientId,
+        text: text.trim(), time,
+        created_at: persisted.created_at,
+        is_e2ee: isE2ee,
+        reply_to_id: replyToId,
+        is_forwarded: isForwarded,
+        is_edited: 0,
+        is_deleted_for_all: 0,
+        is_delivered: 0,
+        is_read: 0,
+        senderName: socket.user.username,
+        reactions: []
+      };
+
+      if (replyToId) {
+        const original = await db.get('SELECT text, sender_id, is_deleted_for_all FROM messages WHERE id = ?', [replyToId]);
+        if (original) {
+          savedMsg.reply_text = original.text;
+          savedMsg.reply_sender_id = original.sender_id;
+          savedMsg.reply_is_deleted_for_all = original.is_deleted_for_all;
+        }
+      }
+
+      console.log(`[MSG] ${socket.user.username} -> user_${recipientId}: "${text.trim()}"`);
+      socket.to(`user_${recipientId}`).emit('newPrivateMessage', savedMsg);
+      socket.emit('newPrivateMessage', savedMsg);
+    } catch (error) {
+      console.error('[MSG] Failed to persist private message', {
+        senderId: userId,
+        recipientId,
+        error: error.message
+      });
+      socket.emit('messageError', {
+        code: 'MESSAGE_PERSIST_FAILED',
+        error: 'Message could not be saved. Please try again.'
+      });
+    }
   });
 
   // Reactions
@@ -916,6 +963,7 @@ initDB().then(() => {
       console.log(`[keep-alive] Self-ping active → ${SELF_URL} every 10 min`);
     }
   });
-}).catch(() => process.exit(1));
-
-
+}).catch((error) => {
+  console.error('[startup] Database initialization failed; refusing to start', error);
+  process.exit(1);
+});
