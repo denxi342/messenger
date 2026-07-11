@@ -80,7 +80,9 @@ export default function Message({
   else if (isLast) posClass = 'msg-last';
 
   const msgReactions = localReactions[msg.id] || [];
-  const hasReply = msg.reply_to_id && (msg.reply_text || msg.reply_is_deleted_for_all);
+  // reply_to_id is the authoritative signal. Reply metadata is display data and
+  // can be absent briefly for a newly received Socket.IO event.
+  const hasReply = Number(msg.reply_to_id) > 0;
 
   // SQLite returns 0/1 as integers — convert to booleans explicitly
   const isDeletedForAll = Number(msg.is_deleted_for_all) === 1;
@@ -107,7 +109,7 @@ export default function Message({
           replyText={msg.reply_text}
           replySenderId={msg.reply_sender_id}
           currentUserId={currentUser.userId}
-          contactName={contactName}
+          contactName={msg.reply_sender_name || contactName}
           isDeleted={Number(msg.reply_is_deleted_for_all) === 1}
           onClick={() => scrollToMsg(msg.reply_to_id)}
         />

@@ -602,7 +602,14 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
       <div className="composer">
         {/* Reply preview */}
         {replyTo && (
-          <div className="composer-reply">
+          <div
+            className="composer-reply"
+            role="button"
+            tabIndex={0}
+            title="Нажмите, чтобы отменить ответ"
+            onClick={() => setReplyTo(null)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setReplyTo(null); }}
+          >
             <div className="composer-reply-bar" />
             <div className="composer-reply-content">
               <span className="composer-reply-label">Ответ: </span>
