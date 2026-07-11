@@ -162,7 +162,13 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
       setMessagesData(prev => {
         const updated = {};
         Object.entries(prev).forEach(([cid, msgs]) => {
-          updated[cid] = msgs.map(m => m.id === messageId ? { ...m, is_deleted_for_all: 1, reactions: [] } : m);
+          updated[cid] = msgs.map(m => {
+            if (m.id === messageId) return { ...m, is_deleted_for_all: 1, reactions: [] };
+            if (Number(m.reply_to_id) === Number(messageId)) {
+              return { ...m, reply_text: null, reply_is_deleted_for_all: 1 };
+            }
+            return m;
+          });
         });
         return updated;
       });
@@ -172,7 +178,11 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
       setMessagesData(prev => {
         const updated = {};
         Object.entries(prev).forEach(([cid, msgs]) => {
-          updated[cid] = msgs.map(m => m.id === messageId ? { ...m, text, is_edited: 1 } : m);
+          updated[cid] = msgs.map(m => {
+            if (m.id === messageId) return { ...m, text, is_edited: 1 };
+            if (Number(m.reply_to_id) === Number(messageId)) return { ...m, reply_text: text };
+            return m;
+          });
         });
         return updated;
       });

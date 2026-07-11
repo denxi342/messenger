@@ -230,15 +230,21 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
         setLocalMessages(prev => prev.filter(m => m.id !== messageId));
       },
       messageDeletedAll: (messageId) => {
-        setLocalMessages(prev => prev.map(m =>
-          m.id === messageId ? { ...m, is_deleted_for_all: 1, reactions: [] } : m
-        ));
+        setLocalMessages(prev => prev.map(m => {
+          if (m.id === messageId) return { ...m, is_deleted_for_all: 1, reactions: [] };
+          if (Number(m.reply_to_id) === Number(messageId)) {
+            return { ...m, reply_text: null, reply_is_deleted_for_all: 1 };
+          }
+          return m;
+        }));
         setLocalReactions(prev => { const n = { ...prev }; delete n[messageId]; return n; });
       },
       messageEdited: ({ messageId, text }) => {
-        setLocalMessages(prev => prev.map(m =>
-          m.id === messageId ? { ...m, text, is_edited: 1 } : m
-        ));
+        setLocalMessages(prev => prev.map(m => {
+          if (m.id === messageId) return { ...m, text, is_edited: 1 };
+          if (Number(m.reply_to_id) === Number(messageId)) return { ...m, reply_text: text };
+          return m;
+        }));
       },
       deliveryUpdated: () => {
         setLocalMessages(prev => prev.map(m =>
@@ -358,6 +364,11 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
     setContextMenu({ x: e.clientX, y: e.clientY, msg });
   };
 
+  const beginReply = (msg) => {
+    setReplyTo(msg);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
   const handleReactionToggle = (messageId, emoji, alreadyReacted) => {
     if (!socket) return;
     if (alreadyReacted) socket.emit('removeReaction', { messageId, emoji });
@@ -447,7 +458,7 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
           msg={contextMenu.msg}
           currentUserId={currentUser.userId}
           onClose={() => setContextMenu(null)}
-          onReply={(msg) => setReplyTo(msg)}
+          onReply={beginReply}
           onEdit={(msg) => setEditingMsg(msg)}
           onPin={handlePin}
           onForward={(msg) => setForwardMsg(msg)}
@@ -571,7 +582,7 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
                       localReactions={localReactions}
                       msgRefs={msgRefs}
                       scrollToMsg={scrollToMsg}
-                      setReplyTo={setReplyTo}
+                      setReplyTo={beginReply}
                       handleQuickReact={handleQuickReact}
                       handleReactionToggle={handleReactionToggle}
                       handleContextMenu={handleContextMenu}

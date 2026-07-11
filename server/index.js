@@ -208,7 +208,7 @@ async function initDB() {
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       is_read BOOLEAN DEFAULT 0,
       is_e2ee BOOLEAN DEFAULT 0,
-      reply_to_id INTEGER DEFAULT NULL,
+      reply_to_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
       FOREIGN KEY(sender_id) REFERENCES users(id),
       FOREIGN KEY(recipient_id) REFERENCES users(id)
     );
@@ -266,6 +266,7 @@ async function initDB() {
     ['is_edited', 'ALTER TABLE messages ADD COLUMN is_edited BOOLEAN DEFAULT 0'],
     ['is_forwarded', 'ALTER TABLE messages ADD COLUMN is_forwarded BOOLEAN DEFAULT 0'],
     ['is_delivered', 'ALTER TABLE messages ADD COLUMN is_delivered BOOLEAN DEFAULT 0'],
+    ['reply_to_id', 'ALTER TABLE messages ADD COLUMN reply_to_id INTEGER'],
     ['created_at', 'ALTER TABLE messages ADD COLUMN created_at DATETIME']
   ];
 
@@ -292,6 +293,7 @@ async function initDB() {
   // allow LibSQL to serve the OR branches without a full messages-table scan.
   await db.exec('CREATE INDEX IF NOT EXISTS idx_messages_sender_recipient_created_at ON messages (sender_id, recipient_id, created_at, id)');
   await db.exec('CREATE INDEX IF NOT EXISTS idx_messages_recipient_sender_created_at ON messages (recipient_id, sender_id, created_at, id)');
+  await db.exec('CREATE INDEX IF NOT EXISTS idx_messages_reply_to_id ON messages (reply_to_id)');
 }
 
 // Auth Middleware
@@ -654,10 +656,14 @@ io.on('connection', (socket) => {
     const contactId = Number(rawContactId);
     const messages = await db.all(`
       SELECT m.*, u.username as senderName,
-        rm.text as reply_text, rm.sender_id as reply_sender_id, rm.is_deleted_for_all as reply_is_deleted_for_all
+        rm.text as reply_text, rm.sender_id as reply_sender_id,
+        rm.created_at as reply_created_at,
+        ru.username as reply_sender_name,
+        rm.is_deleted_for_all as reply_is_deleted_for_all
       FROM messages m
       JOIN users u ON m.sender_id = u.id
       LEFT JOIN messages rm ON m.reply_to_id = rm.id
+      LEFT JOIN users ru ON rm.sender_id = ru.id
       WHERE ((m.sender_id = ? AND m.recipient_id = ?)
          OR (m.sender_id = ? AND m.recipient_id = ?))
          AND m.id NOT IN (SELECT message_id FROM deleted_messages WHERE user_id = ?)
@@ -697,13 +703,39 @@ io.on('connection', (socket) => {
     if (!recipientId || typeof text !== 'string' || !text.trim()) return;
 
     try {
+      const normalizedReplyToId = replyToId == null ? null : Number(replyToId);
+      if (replyToId != null && (!Number.isInteger(normalizedReplyToId) || normalizedReplyToId <= 0)) {
+        socket.emit('actionError', { event: 'sendPrivateMessage', reason: 'Invalid reply target' });
+        return;
+      }
+
+      let replyParent = null;
+      if (normalizedReplyToId) {
+        replyParent = await db.get(
+          `SELECT m.id, m.sender_id, m.recipient_id, m.text, m.created_at,
+                  m.is_deleted_for_all, u.username AS sender_name
+           FROM messages m
+           JOIN users u ON u.id = m.sender_id
+           WHERE m.id = ?`,
+          [normalizedReplyToId]
+        );
+        const belongsToConversation = replyParent && (
+          (Number(replyParent.sender_id) === userId && Number(replyParent.recipient_id) === recipientId) ||
+          (Number(replyParent.sender_id) === recipientId && Number(replyParent.recipient_id) === userId)
+        );
+        if (!belongsToConversation) {
+          socket.emit('actionError', { event: 'sendPrivateMessage', reason: 'Reply target is not in this conversation' });
+          return;
+        }
+      }
+
       // Explicitly use the database clock. This also works for legacy Turso
       // databases where created_at was added without a DEFAULT expression.
       const result = await db.run(
         `INSERT INTO messages
           (sender_id, recipient_id, text, time, is_e2ee, reply_to_id, is_forwarded, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-        [userId, recipientId, text.trim(), time, isE2ee ? 1 : 0, replyToId, isForwarded ? 1 : 0]
+        [userId, recipientId, text.trim(), time, isE2ee ? 1 : 0, normalizedReplyToId, isForwarded ? 1 : 0]
       );
       const persisted = await db.get(
         'SELECT id, created_at FROM messages WHERE id = ?',
@@ -720,7 +752,7 @@ io.on('connection', (socket) => {
         text: text.trim(), time,
         created_at: persisted.created_at,
         is_e2ee: isE2ee,
-        reply_to_id: replyToId,
+        reply_to_id: normalizedReplyToId,
         is_forwarded: isForwarded,
         is_edited: 0,
         is_deleted_for_all: 0,
@@ -730,13 +762,12 @@ io.on('connection', (socket) => {
         reactions: []
       };
 
-      if (replyToId) {
-        const original = await db.get('SELECT text, sender_id, is_deleted_for_all FROM messages WHERE id = ?', [replyToId]);
-        if (original) {
-          savedMsg.reply_text = original.text;
-          savedMsg.reply_sender_id = original.sender_id;
-          savedMsg.reply_is_deleted_for_all = original.is_deleted_for_all;
-        }
+      if (replyParent) {
+        savedMsg.reply_text = replyParent.text;
+        savedMsg.reply_sender_id = replyParent.sender_id;
+        savedMsg.reply_sender_name = replyParent.sender_name;
+        savedMsg.reply_created_at = replyParent.created_at;
+        savedMsg.reply_is_deleted_for_all = replyParent.is_deleted_for_all;
       }
 
       console.log(`[MSG] ${socket.user.username} -> user_${recipientId}: "${text.trim()}"`);
