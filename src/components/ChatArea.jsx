@@ -1,456 +1,450 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Avatar from './Avatar';
 import MessageComponent from './Message';
 
-const EMOJI_PICKER = ['😀','😂','😍','🥺','😭','🤔','🔥','❤️','👍','💯','✨','🎉','😎','🥳','👀','💀','😤','🤯','💪','🙏','😁','🤣','😊','😢','😡','🥰','🤩','😴','🤑','😏'];
+const EMOJI_PICKER = [
+  '😀', '😂', '😍', '🥲', '😭', '🤔', '🔥', '❤️',
+  '👍', '💯', '✨', '🎉', '😎', '🥳', '👀', '💬',
+];
 
 function groupMessages(messages, currentUserId) {
-  if (!messages.length) return [];
   const groups = [];
-  let current = null;
-  messages.forEach(msg => {
-    const sid = Number(msg.sender_id);
-    if (!current || current.senderId !== sid) {
-      current = { senderId: sid, isOwn: sid === Number(currentUserId), messages: [] };
-      groups.push(current);
+  let currentGroup = null;
+
+  messages.forEach((message) => {
+    const senderId = Number(message.sender_id);
+    const isOwn = senderId === Number(currentUserId);
+
+    if (!currentGroup || currentGroup.senderId !== senderId) {
+      currentGroup = {
+        senderId,
+        isOwn,
+        messages: [],
+      };
+
+      groups.push(currentGroup);
     }
-    current.messages.push(msg);
+
+    currentGroup.messages.push(message);
   });
+
   return groups;
 }
 
-function formatDateSeparator(time) {
-  if (!time) return null;
-  // time is "HH:MM" — try to use message date from id or a date field
-  return null; // We'll implement date separators via a date field when available
+function truncate(text, limit = 90) {
+  const value = String(text || '');
+  return value.length > limit ? `${value.slice(0, limit)}…` : value;
 }
 
-function ContextMenu({ x, y, msg, currentUserId, onClose, onReply, onEdit, onPin, onForward, onDeleteSelf, onDeleteAll }) {
-  const ref = useRef(null);
+function ContextMenu({
+  x,
+  y,
+  msg,
+  currentUserId,
+  onClose,
+  onReply,
+  onCopy,
+  onReact,
+}) {
+  const menuRef = useRef(null);
 
   useEffect(() => {
-    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
-    const escHandler = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('mousedown', handler);
-    document.addEventListener('keydown', escHandler);
-    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('keydown', escHandler); };
+    const onPointerDown = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        onClose();
+      }
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, [onClose]);
 
-  const style = { top: Math.min(y, window.innerHeight - 350), left: Math.min(x, window.innerWidth - 200) };
+  const isDeleted = Number(msg.is_deleted_for_all) === 1;
   const isOwn = Number(msg.sender_id) === Number(currentUserId);
-  const isDeleted = !!msg.is_deleted_for_all;
 
-  const items = [
-    !isDeleted && { icon: '↩️', label: 'Ответить', action: () => { onReply(msg); onClose(); } },
-    !isDeleted && { icon: '📋', label: 'Копировать', action: () => { navigator.clipboard.writeText(msg.text); onClose(); } },
-    !isDeleted && { icon: '↗️', label: 'Переслать', action: () => { onForward(msg); onClose(); } },
-    !isDeleted && { icon: '📌', label: 'Закрепить', action: () => { onPin(msg); onClose(); } },
-    isOwn && !isDeleted && { icon: '✏️', label: 'Редактировать', action: () => { onEdit(msg); onClose(); } },
-    { icon: '🗑️', label: 'Удалить у себя', action: () => { onDeleteSelf(msg.id); onClose(); }, className: 'ctx-danger' },
-    isOwn && !isDeleted && { icon: '🗑️', label: 'Удалить у всех', action: () => { onDeleteAll(msg.id); onClose(); }, className: 'ctx-danger' },
-  ].filter(Boolean);
-
-  return (
-    <div className="ctx-menu" style={style} ref={ref}>
-      {items.map((item, i) => (
-        <button key={i} className={`ctx-item ${item.className || ''}`} onClick={item.action}>
-          <span className="ctx-icon">{item.icon}</span>
-          <span>{item.label}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function ForwardModal({ contacts, onClose, onForward }) {
-  const [selected, setSelected] = useState([]);
-
-  const toggle = (id) => {
-    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const style = {
+    top: Math.max(12, Math.min(y, window.innerHeight - 300)),
+    left: Math.max(12, Math.min(x, window.innerWidth - 220)),
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 340 }}>
-        <button className="modal-close-btn" onClick={onClose}>✕</button>
-        <h3>Переслать сообщение</h3>
-        <p className="modal-subtitle">Выберите контакты</p>
-        <div className="contacts-list" style={{ maxHeight: 300, overflowY: 'auto' }}>
-          {contacts.map(c => (
-            <div
-              key={c.id}
-              className={`contact-item ${selected.includes(c.id) ? 'active' : ''}`}
-              onClick={() => toggle(c.id)}
-              style={{ cursor: 'pointer', padding: '8px 12px' }}
-            >
-              <Avatar src={c.avatar_base64 || null} name={c.display_name || c.username} size={36} />
-              <div className="contact-info" style={{ marginLeft: 10 }}>
-                <span className="contact-name">{c.display_name || c.username}</span>
-              </div>
-              {selected.includes(c.id) && <span style={{ marginLeft: 'auto', color: 'var(--accent)' }}>✓</span>}
-            </div>
-          ))}
-        </div>
+    <div className="ctx-menu" ref={menuRef} style={style}>
+      {!isDeleted && (
         <button
-          className="add-btn"
-          style={{ marginTop: 12, width: '100%' }}
-          disabled={selected.length === 0}
-          onClick={() => { onForward(selected); onClose(); }}
+          type="button"
+          className="ctx-item"
+          onClick={() => {
+            console.log('[ContextMenu] reply selected', {
+              messageId: msg.id,
+              text: msg.text,
+            });
+
+            onReply(msg);
+            onClose();
+          }}
         >
-          Переслать ({selected.length})
+          <span className="ctx-icon">↩️</span>
+          <span>Ответить</span>
         </button>
-      </div>
+      )}
+
+      {!isDeleted && (
+        <button
+          type="button"
+          className="ctx-item"
+          onClick={() => {
+            navigator.clipboard?.writeText(msg.text || '');
+            onClose();
+          }}
+        >
+          <span className="ctx-icon">📋</span>
+          <span>Копировать</span>
+        </button>
+      )}
+
+      {!isDeleted && (
+        <button
+          type="button"
+          className="ctx-item"
+          onClick={() => {
+            onReact(msg, '👍');
+            onClose();
+          }}
+        >
+          <span className="ctx-icon">👍</span>
+          <span>Реакция</span>
+        </button>
+      )}
+
+      {isOwn && !isDeleted && (
+        <span className="ctx-menu-own-message">Ваше сообщение</span>
+      )}
     </div>
   );
 }
 
-function EditModal({ msg, onClose, onSave }) {
-  const [text, setText] = useState(msg.text);
-  const taRef = useRef(null);
+function ReplyComposerPreview({ replyTo, currentUser, contactName, onCancel }) {
+  const originalSenderName = Number(replyTo.sender_id) === Number(currentUser.userId)
+    ? 'Вы'
+    : (replyTo.senderName || replyTo.reply_sender_name || contactName || 'Пользователь');
 
-  useEffect(() => { taRef.current?.focus(); taRef.current?.select(); }, []);
-
-  const handleSave = () => {
-    const t = text.trim();
-    if (t && t !== msg.text) onSave(msg.id, t);
-    onClose();
-  };
+  const originalDeleted = Number(replyTo.is_deleted_for_all) === 1;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
-        <button className="modal-close-btn" onClick={onClose}>✕</button>
-        <h3>Редактировать сообщение</h3>
-        <textarea
-          ref={taRef}
-          value={text}
-          onChange={e => setText(e.target.value)}
-          rows={4}
-          style={{ width: '100%', marginTop: 12, padding: 10, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', resize: 'vertical', fontSize: 14 }}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSave(); } }}
-        />
-        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-          <button className="add-btn" onClick={handleSave} style={{ flex: 1 }}>Сохранить</button>
-          <button onClick={onClose} style={{ flex: 1, padding: '8px 16px', borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)', cursor: 'pointer' }}>Отмена</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+    <div
+      className="composer-reply"
+      role="button"
+      tabIndex={0}
+      title="Нажмите, чтобы отменить ответ"
+      onClick={() => {
+        console.log('[ReplyComposer] reply cancelled by preview click');
+        onCancel();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onCancel();
+        }
+      }}
+    >
+      <span className="composer-reply-bar" />
 
-function PinnedBar({ pinnedMessages, messages, onScrollTo, onUnpin }) {
-  if (!pinnedMessages || pinnedMessages.length === 0) return null;
-  const currentPinnedId = pinnedMessages[pinnedMessages.length - 1];
-  const pinnedMsg = messages.find(m => m.id === currentPinnedId);
-  if (!pinnedMsg) return null;
-
-  return (
-    <div className="pinned-bar" onClick={() => onScrollTo(pinnedMsg.id)}>
-      <span className="pinned-bar-icon">📌</span>
-      <div className="pinned-bar-content">
-        <span className="pinned-bar-label">Закреплено • {pinnedMessages.length > 1 ? `${pinnedMessages.length} сообщения` : ''}</span>
-        <span className="pinned-bar-text">
-          {pinnedMsg.is_deleted_for_all ? 'Сообщение удалено' : (pinnedMsg.text?.length > 60 ? pinnedMsg.text.slice(0, 60) + '…' : pinnedMsg.text)}
+      <div className="composer-reply-content">
+        <span className="composer-reply-label">В ответ на {originalSenderName}</span>
+        <span className="composer-reply-text">
+          {originalDeleted ? 'Сообщение удалено' : truncate(replyTo.text)}
         </span>
       </div>
+
+      <button
+        type="button"
+        className="composer-reply-close"
+        aria-label="Отменить ответ"
+        onClick={(event) => {
+          event.stopPropagation();
+          console.log('[ReplyComposer] reply cancelled by close button');
+          onCancel();
+        }}
+      >
+        ×
+      </button>
     </div>
   );
 }
 
-function SearchBar({ query, onQuery, results, currentIdx, onPrev, onNext, onClose }) {
-  const inputRef = useRef(null);
-  useEffect(() => { inputRef.current?.focus(); }, []);
-
-  return (
-    <div className="search-bar">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.5, flexShrink: 0 }}>
-        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-      </svg>
-      <input
-        ref={inputRef}
-        type="text"
-        placeholder="Поиск в чате..."
-        value={query}
-        onChange={e => onQuery(e.target.value)}
-        className="search-bar-input"
-      />
-      {results.length > 0 && (
-        <span className="search-bar-count">{currentIdx + 1} / {results.length}</span>
-      )}
-      {query && results.length === 0 && (
-        <span className="search-bar-count" style={{ color: 'var(--text-secondary)' }}>Нет результатов</span>
-      )}
-      <button className="search-bar-nav" onClick={onPrev} disabled={results.length === 0} title="Предыдущий (Shift+Enter)">↑</button>
-      <button className="search-bar-nav" onClick={onNext} disabled={results.length === 0} title="Следующий (Enter)">↓</button>
-      <button className="search-bar-close" onClick={onClose}>✕</button>
-    </div>
-  );
-}
-
-const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, myAvatar, setTypingUsers, settings, socket, contacts = [], onMessagesUpdate, pinnedMessages = [] }) => {
+export default function ChatArea({
+  activeChat,
+  messages = [],
+  onSendMessage,
+  currentUser,
+  onLogout,
+  myAvatar,
+  settings,
+  socket,
+  contacts = [],
+  pinnedMessages = [],
+}) {
   const [inputText, setInputText] = useState('');
   const [replyTo, setReplyTo] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [localReactions, setLocalReactions] = useState({});
   const [localMessages, setLocalMessages] = useState(messages);
-  const [editingMsg, setEditingMsg] = useState(null);
-  const [forwardMsg, setForwardMsg] = useState(null);
-  const [showSearch, setShowSearch] = useState(false);
+  const [localReactions, setLocalReactions] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [searchIdx, setSearchIdx] = useState(0);
+  const [showSearch, setShowSearch] = useState(false);
 
+  const messageRefs = useRef({});
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
-  const prevMsgCount = useRef(0);
-  const msgRefs = useRef({});
+  const activeChatIdRef = useRef(activeChat?.id);
 
-  const contactName = activeChat ? (activeChat.display_name || activeChat.username) : '';
+  const contactName = activeChat
+    ? (activeChat.display_name || activeChat.username)
+    : '';
+
   const contactAvatar = activeChat?.avatar_base64 || null;
 
-  // Sync local messages from props
   useEffect(() => {
-    setLocalMessages(messages);
-    const reactionMap = {};
-    messages.forEach(m => { if (m.reactions) reactionMap[m.id] = m.reactions; });
-    setLocalReactions(reactionMap);
-  }, [messages]);
-
-  // Handle realtime socket events
-  useEffect(() => {
-    if (!socket) return;
-
-    const handlers = {
-      reactionsUpdated: ({ messageId, reactions }) => {
-        setLocalReactions(prev => ({ ...prev, [messageId]: reactions }));
-      },
-      messageDeletedSelf: (messageId) => {
-        setLocalMessages(prev => prev.filter(m => m.id !== messageId));
-      },
-      messageDeletedAll: (messageId) => {
-        setLocalMessages(prev => prev.map(m => {
-          if (m.id === messageId) return { ...m, is_deleted_for_all: 1, reactions: [] };
-          if (Number(m.reply_to_id) === Number(messageId)) {
-            return { ...m, reply_text: null, reply_is_deleted_for_all: 1 };
-          }
-          return m;
-        }));
-        setLocalReactions(prev => { const n = { ...prev }; delete n[messageId]; return n; });
-      },
-      messageEdited: ({ messageId, text }) => {
-        setLocalMessages(prev => prev.map(m => {
-          if (m.id === messageId) return { ...m, text, is_edited: 1 };
-          if (Number(m.reply_to_id) === Number(messageId)) return { ...m, reply_text: text };
-          return m;
-        }));
-      },
-      deliveryUpdated: () => {
-        setLocalMessages(prev => prev.map(m =>
-          m.sender_id === Number(currentUser.userId) ? { ...m, is_delivered: 1 } : m
-        ));
-      },
-      readUpdated: ({ contactId }) => {
-        const cid = Number(contactId);
-        if (activeChat && Number(activeChat.id) === cid) {
-          setLocalMessages(prev => prev.map(m =>
-            m.sender_id === Number(currentUser.userId) ? { ...m, is_read: 1 } : m
-          ));
-        }
-      },
-    };
-
-    Object.entries(handlers).forEach(([evt, fn]) => socket.on(evt, fn));
-    return () => Object.entries(handlers).forEach(([evt, fn]) => socket.off(evt, fn));
-  }, [socket, activeChat, currentUser]);
-
-  // Keyboard shortcut Ctrl+F
-  useEffect(() => {
-    const handler = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-        e.preventDefault();
-        setShowSearch(true);
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, []);
-
-  // Mark as read when chat opens
-  useEffect(() => {
-    if (activeChat && socket) {
-      socket.emit('markAsRead', Number(activeChat.id));
-    }
-    setShowSearch(false);
-    setSearchQuery('');
-    setReplyTo(null);
+    activeChatIdRef.current = activeChat?.id;
   }, [activeChat]);
 
-  // Search logic
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      setSearchIdx(0);
-      return;
-    }
-    const q = searchQuery.toLowerCase();
-    const results = localMessages
-      .filter(m => !m.is_deleted_for_all && m.text?.toLowerCase().includes(q))
-      .map(m => m.id);
-    setSearchResults(results);
-    setSearchIdx(0);
-  }, [searchQuery, localMessages]);
+    setLocalMessages(messages);
 
-  // Auto-scroll to current search result
-  useEffect(() => {
-    if (searchResults.length > 0) {
-      scrollToMsg(searchResults[searchIdx], true);
-    }
-  }, [searchIdx, searchResults]);
-
-  const scrollToBottom = (instant = false) => {
-    messagesEndRef.current?.scrollIntoView({ behavior: instant ? 'auto' : 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom(prevMsgCount.current === 0);
-    prevMsgCount.current = localMessages.length;
-  }, [localMessages]);
-
-  const scrollToMsg = (msgId, isSearch = false) => {
-    const el = msgRefs.current[msgId];
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      if (!isSearch) {
-        el.classList.add('msg-highlight');
-        setTimeout(() => el.classList.remove('msg-highlight'), 1500);
+    const reactionsMap = {};
+    messages.forEach((message) => {
+      if (Array.isArray(message.reactions)) {
+        reactionsMap[message.id] = message.reactions;
       }
+    });
+
+    setLocalReactions(reactionsMap);
+  }, [messages]);
+
+  useEffect(() => {
+    setReplyTo(null);
+    setInputText('');
+    setShowSearch(false);
+    setSearchQuery('');
+  }, [activeChat?.id]);
+
+  useEffect(() => {
+    if (!socket) return undefined;
+
+    const onReactionsUpdated = ({ messageId, reactions }) => {
+      setLocalReactions((previous) => ({
+        ...previous,
+        [messageId]: reactions,
+      }));
+    };
+
+    const onMessageDeletedAll = (messageId) => {
+      setLocalMessages((previous) => previous.map((message) => {
+        if (Number(message.id) === Number(messageId)) {
+          return {
+            ...message,
+            is_deleted_for_all: 1,
+            reactions: [],
+          };
+        }
+
+        if (Number(message.reply_to_id) === Number(messageId)) {
+          return {
+            ...message,
+            reply_text: null,
+            reply_is_deleted_for_all: 1,
+          };
+        }
+
+        return message;
+      }));
+    };
+
+    const onMessageEdited = ({ messageId, text }) => {
+      setLocalMessages((previous) => previous.map((message) => {
+        if (Number(message.id) === Number(messageId)) {
+          return { ...message, text, is_edited: 1 };
+        }
+
+        if (Number(message.reply_to_id) === Number(messageId)) {
+          return { ...message, reply_text: text };
+        }
+
+        return message;
+      }));
+    };
+
+    socket.on('reactionsUpdated', onReactionsUpdated);
+    socket.on('messageDeletedAll', onMessageDeletedAll);
+    socket.on('messageEdited', onMessageEdited);
+
+    return () => {
+      socket.off('reactionsUpdated', onReactionsUpdated);
+      socket.off('messageDeletedAll', onMessageDeletedAll);
+      socket.off('messageEdited', onMessageEdited);
+    };
+  }, [socket]);
+
+  const scrollToMessage = (messageId) => {
+    const target = messageRefs.current[messageId];
+
+    console.log('[ChatArea] scroll to original message', {
+      messageId,
+      found: Boolean(target),
+    });
+
+    if (!target) return;
+
+    target.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+
+    target.classList.add('msg-highlight');
+
+    window.setTimeout(() => {
+      target.classList.remove('msg-highlight');
+    }, 1500);
+  };
+
+  const beginReply = (message) => {
+    console.log('[ChatArea] reply target selected', {
+      messageId: message.id,
+      text: message.text,
+    });
+
+    setReplyTo(message);
+    setContextMenu(null);
+
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+  };
+
+  const cancelReply = () => {
+    setReplyTo(null);
+  };
+
+  const handleInputChange = (event) => {
+    const value = event.target.value;
+    setInputText(value);
+
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
     }
-  };
 
-  const autoResize = () => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
-  };
-
-  const handleInputChange = (e) => {
-    setInputText(e.target.value);
-    autoResize();
     if (socket && activeChat) {
-      socket.emit('typing', { recipientId: activeChat.id, isTyping: e.target.value.length > 0 });
+      socket.emit('typing', {
+        recipientId: Number(activeChat.id),
+        isTyping: value.trim().length > 0,
+      });
     }
   };
 
-  const handleSubmit = (e) => {
-    e?.preventDefault();
+  const sendMessage = () => {
     const text = inputText.trim();
-    if (!text) return;
-    onSendMessage(text, replyTo?.id || null);
+    if (!text || !activeChat) return;
+
+    const replyToId = replyTo?.id ? Number(replyTo.id) : null;
+
+    console.log('[ChatArea] sending message', {
+      text,
+      replyToId,
+      replyTarget: replyTo,
+    });
+
+    onSendMessage(text, replyToId);
+
     setInputText('');
     setReplyTo(null);
-    if (socket && activeChat) socket.emit('typing', { recipientId: activeChat.id, isTyping: false });
-    setTimeout(() => { if (textareaRef.current) textareaRef.current.style.height = 'auto'; }, 0);
-  };
+    setShowEmojiPicker(false);
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
-  };
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
 
-  const handleContextMenu = (e, msg) => {
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, msg });
-  };
-
-  const beginReply = (msg) => {
-    setReplyTo(msg);
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  };
-
-  const handleReactionToggle = (messageId, emoji, alreadyReacted) => {
-    if (!socket) return;
-    if (alreadyReacted) socket.emit('removeReaction', { messageId, emoji });
-    else socket.emit('addReaction', { messageId, emoji });
-  };
-
-  const handleQuickReact = (msg, emoji) => {
-    const myReacted = (localReactions[msg.id] || []).some(r => r.emoji === emoji && Number(r.user_id) === Number(currentUser.userId));
-    handleReactionToggle(msg.id, emoji, myReacted);
-  };
-
-  const handleDeleteSelf = (msgId) => {
-    if (!socket) return;
-    socket.emit('deleteMessageSelf', { messageId: msgId });
-  };
-
-  const handleDeleteAll = (msgId) => {
-    if (!socket) return;
-    socket.emit('deleteMessageAll', { messageId: msgId });
-  };
-
-  const handleEditSave = (msgId, newText) => {
-    if (!socket) return;
-    socket.emit('editMessage', { messageId: msgId, newText });
-  };
-
-  const handlePin = (msg) => {
-    if (!socket || !activeChat) return;
-    socket.emit('pinMessage', { messageId: msg.id, contactId: Number(activeChat.id) });
-  };
-
-  const handleForwardSend = (contactIds) => {
-    if (!socket || !forwardMsg) return;
-    contactIds.forEach(cid => {
-      socket.emit('sendPrivateMessage', {
-        recipientId: Number(cid),
-        text: forwardMsg.text,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isE2ee: true,
-        isForwarded: true,
-      });
+    socket?.emit('typing', {
+      recipientId: Number(activeChat.id),
+      isTyping: false,
     });
-    setForwardMsg(null);
   };
 
-  // Drag & drop
-  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
-  const handleDragLeave = () => setIsDragging(false);
-  const handleDrop = (e) => { e.preventDefault(); setIsDragging(false); };
+  const handleInputKeyDown = (event) => {
+    if (event.key === 'Escape' && replyTo) {
+      event.preventDefault();
+      cancelReply();
+      return;
+    }
+
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      sendMessage();
+    }
+  };
+
+  const handleContextMenu = (event, message) => {
+    event.preventDefault();
+
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      msg: message,
+    });
+  };
+
+  const toggleReaction = (messageId, emoji, alreadyReacted) => {
+    if (!socket) return;
+
+    if (alreadyReacted) {
+      socket.emit('removeReaction', { messageId, emoji });
+    } else {
+      socket.emit('addReaction', { messageId, emoji });
+    }
+  };
+
+  const quickReact = (message, emoji) => {
+    const reactions = localReactions[message.id] || message.reactions || [];
+    const alreadyReacted = reactions.some(
+      (reaction) =>
+        reaction.emoji === emoji
+        && Number(reaction.user_id) === Number(currentUser.userId)
+    );
+
+    toggleReaction(message.id, emoji, alreadyReacted);
+  };
+
+  const filteredMessages = searchQuery.trim()
+    ? localMessages.filter((message) =>
+      String(message.text || '').toLowerCase().includes(searchQuery.trim().toLowerCase())
+    )
+    : localMessages;
+
+  const groups = groupMessages(filteredMessages, currentUser.userId);
 
   if (!activeChat) {
     return (
-      <div className="chat-area empty-state">
+      <main className="chat-area empty-state">
         <div className="empty-state-content">
-          <div className="empty-state-icon">
-            <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-          </div>
           <h3>Выберите чат</h3>
-          <p>Ваши сообщения защищены сквозным шифрованием</p>
+          <p>Выберите контакт, чтобы начать общение.</p>
         </div>
-      </div>
+      </main>
     );
   }
 
-  const groups = groupMessages(localMessages, currentUser.userId);
-
   return (
-    <div
-      className={`chat-area ${isDragging ? 'drag-over' : ''}`}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      {isDragging && (
-        <div className="drop-overlay">
-          <div className="drop-zone">📎 Отпустите файл для прикрепления</div>
-        </div>
-      )}
-
-      {/* Context Menu */}
+    <main className="chat-area">
       {contextMenu && (
         <ContextMenu
           x={contextMenu.x}
@@ -459,234 +453,182 @@ const ChatArea = ({ activeChat, messages, onSendMessage, currentUser, onLogout, 
           currentUserId={currentUser.userId}
           onClose={() => setContextMenu(null)}
           onReply={beginReply}
-          onEdit={(msg) => setEditingMsg(msg)}
-          onPin={handlePin}
-          onForward={(msg) => setForwardMsg(msg)}
-          onDeleteSelf={handleDeleteSelf}
-          onDeleteAll={handleDeleteAll}
+          onCopy={(text) => navigator.clipboard?.writeText(text)}
+          onReact={(message, emoji) => quickReact(message, emoji)}
         />
       )}
 
-      {/* Forward Modal */}
-      {forwardMsg && (
-        <ForwardModal
-          contacts={contacts}
-          onClose={() => setForwardMsg(null)}
-          onForward={handleForwardSend}
-        />
-      )}
-
-      {/* Edit Modal */}
-      {editingMsg && (
-        <EditModal
-          msg={editingMsg}
-          onClose={() => setEditingMsg(null)}
-          onSave={handleEditSave}
-        />
-      )}
-
-      {/* Header */}
-      <div className="chat-header">
+      <header className="chat-header">
         <div className="chat-header-info">
           <Avatar src={contactAvatar} name={contactName} size={36} />
+
           <div className="chat-header-text">
             <h2>{contactName}</h2>
             {activeChat.display_name && (
               <span className="chat-header-username">@{activeChat.username}</span>
             )}
           </div>
-          <span className="e2ee-badge" title="End-to-End Encrypted">🔒 E2EE</span>
         </div>
 
         <div className="chat-header-actions">
           <button
+            type="button"
             className="icon-btn"
-            title="Поиск (Ctrl+F)"
-            onClick={() => setShowSearch(p => !p)}
-            style={showSearch ? { color: 'var(--accent)' } : {}}
+            title="Поиск"
+            onClick={() => setShowSearch((visible) => !visible)}
           >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-            </svg>
+            🔍
           </button>
-          <button className="icon-btn" title="Голосовой звонок">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 10.5 19.79 19.79 0 0 1 1.61 2.18 2 2 0 0 1 3.6 0h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 7.91a16 16 0 0 0 6.08 6.08l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
-            </svg>
-          </button>
-          <button className="icon-btn" title="Видеозвонок">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
-            </svg>
-          </button>
-          <span className="header-divider" />
-          <span className="current-user-tag">Вы: {currentUser.username}</span>
-          <button onClick={onLogout} className="logout-btn">Выйти</button>
-        </div>
-      </div>
 
-      {/* Search Bar */}
+          <button type="button" onClick={onLogout} className="logout-btn">
+            Выйти
+          </button>
+        </div>
+      </header>
+
       {showSearch && (
-        <SearchBar
-          query={searchQuery}
-          onQuery={setSearchQuery}
-          results={searchResults}
-          currentIdx={searchIdx}
-          onPrev={() => setSearchIdx(i => (i - 1 + searchResults.length) % searchResults.length)}
-          onNext={() => setSearchIdx(i => (i + 1) % searchResults.length)}
-          onClose={() => { setShowSearch(false); setSearchQuery(''); }}
-        />
+        <div className="search-bar">
+          <input
+            autoFocus
+            type="search"
+            className="search-bar-input"
+            placeholder="Поиск в чате..."
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+
+          <button
+            type="button"
+            className="search-bar-close"
+            onClick={() => {
+              setSearchQuery('');
+              setShowSearch(false);
+            }}
+          >
+            ×
+          </button>
+        </div>
       )}
 
-      {/* Pinned Message Bar */}
-      <PinnedBar
-        pinnedMessages={pinnedMessages}
-        messages={localMessages}
-        onScrollTo={scrollToMsg}
-        onUnpin={() => {}}
-      />
+      {pinnedMessages.length > 0 && (
+        <div className="pinned-bar">
+          📌 Закреплённые сообщения: {pinnedMessages.length}
+        </div>
+      )}
 
-      {/* Messages */}
-      <div className={`messages-list chat-bg--${settings?.chatBackground || 'solid'}`}>
-        {groups.map((group, gi) => {
-          const { isOwn } = group;
-          const senderName = isOwn ? currentUser.username : contactName;
-          const senderAvatar = isOwn ? myAvatar : contactAvatar;
+      <section className={`messages-list chat-bg--${settings?.chatBackground || 'solid'}`}>
+        {groups.map((group, groupIndex) => {
+          const senderName = group.isOwn ? currentUser.username : contactName;
+          const senderAvatar = group.isOwn ? myAvatar : contactAvatar;
 
           return (
-            <div key={gi} className={`msg-group ${isOwn ? 'msg-group--own' : 'msg-group--other'}`}>
-              {!isOwn && (
+            <div
+              key={`${group.senderId}-${groupIndex}`}
+              className={`msg-group ${group.isOwn ? 'msg-group--own' : 'msg-group--other'}`}
+            >
+              {!group.isOwn && (
                 <div className="msg-group__avatar">
                   <Avatar src={senderAvatar} name={senderName} size={36} />
                 </div>
               )}
 
               <div className="msg-group__bubbles">
-                {!isOwn && <span className="msg-sender-name">{senderName}</span>}
+                {!group.isOwn && <span className="msg-sender-name">{senderName}</span>}
 
-                {group.messages.map((msg, mi) => {
-                  const isFirst = mi === 0;
-                  const isLast = mi === group.messages.length - 1;
-                  const isHighlighted = searchResults[searchIdx] === msg.id;
-
-                  return (
-                    <MessageComponent
-                      key={msg.id}
-                      msg={msg}
-                      isOwn={isOwn}
-                      isFirst={isFirst}
-                      isLast={isLast}
-                      contactName={contactName}
-                      currentUser={currentUser}
-                      settings={settings}
-                      localReactions={localReactions}
-                      msgRefs={msgRefs}
-                      scrollToMsg={scrollToMsg}
-                      setReplyTo={beginReply}
-                      handleQuickReact={handleQuickReact}
-                      handleReactionToggle={handleReactionToggle}
-                      handleContextMenu={handleContextMenu}
-                      isHighlighted={isHighlighted}
-                      searchQuery={searchQuery}
-                    />
-                  );
-                })}
+                {group.messages.map((message, messageIndex) => (
+                  <MessageComponent
+                    key={message.id}
+                    msg={message}
+                    isOwn={group.isOwn}
+                    isFirst={messageIndex === 0}
+                    isLast={messageIndex === group.messages.length - 1}
+                    contactName={contactName}
+                    currentUser={currentUser}
+                    settings={settings}
+                    localReactions={localReactions}
+                    msgRefs={messageRefs}
+                    scrollToMsg={scrollToMessage}
+                    setReplyTo={beginReply}
+                    handleQuickReact={quickReact}
+                    handleReactionToggle={toggleReaction}
+                    handleContextMenu={handleContextMenu}
+                    isHighlighted={false}
+                    searchQuery={searchQuery}
+                  />
+                ))}
               </div>
             </div>
           );
         })}
-        <div ref={messagesEndRef} />
-      </div>
 
-      {/* Composer */}
-      <div className="composer">
-        {/* Reply preview */}
+        <div ref={messagesEndRef} />
+      </section>
+
+      <footer className="composer">
         {replyTo && (
-          <div
-            className="composer-reply"
-            role="button"
-            tabIndex={0}
-            title="Нажмите, чтобы отменить ответ"
-            onClick={() => setReplyTo(null)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setReplyTo(null); }}
-          >
-            <div className="composer-reply-bar" />
-            <div className="composer-reply-content">
-              <span className="composer-reply-label">Ответ: </span>
-              <span className="composer-reply-text">
-                {replyTo.is_deleted_for_all ? <i>Сообщение удалено</i> : (replyTo.text.length > 60 ? replyTo.text.slice(0, 60) + '…' : replyTo.text)}
-              </span>
-            </div>
-            <button className="composer-reply-close" onClick={() => setReplyTo(null)}>✕</button>
-          </div>
+          <ReplyComposerPreview
+            replyTo={replyTo}
+            currentUser={currentUser}
+            contactName={contactName}
+            onCancel={cancelReply}
+          />
         )}
 
         <div className="composer-row">
-          {/* Left actions */}
-          <div className="composer-actions-left">
-            <button className="composer-btn" title="Прикрепить">
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-              </svg>
-            </button>
-          </div>
+          <button type="button" className="composer-btn" title="Прикрепить файл">
+            📎
+          </button>
 
-          {/* Input */}
           <div className="composer-input-wrap">
             <textarea
               ref={textareaRef}
               rows={1}
               value={inputText}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              placeholder="Написать сообщение..."
               className="composer-input"
+              placeholder="Написать сообщение..."
+              onChange={handleInputChange}
+              onKeyDown={handleInputKeyDown}
             />
           </div>
 
-          {/* Right actions */}
-          <div className="composer-actions-right">
-            <button
-              className="composer-btn"
-              title="Эмодзи"
-              onClick={() => setShowEmojiPicker(p => !p)}
-            >
-              😊
-            </button>
-            {inputText.trim() ? (
-              <button className="send-btn send-btn--active" onClick={handleSubmit} title="Отправить">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-                </svg>
-              </button>
-            ) : (
-              <button className="composer-btn" title="Голосовое сообщение">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
-                  <line x1="8" y1="23" x2="16" y2="23"/>
-                </svg>
-              </button>
-            )}
-          </div>
+          <button
+            type="button"
+            className="composer-btn"
+            title="Эмодзи"
+            onClick={() => setShowEmojiPicker((visible) => !visible)}
+          >
+            😊
+          </button>
+
+          <button
+            type="button"
+            className={`send-btn ${inputText.trim() ? 'send-btn--active' : ''}`}
+            title="Отправить"
+            disabled={!inputText.trim()}
+            onClick={sendMessage}
+          >
+            ➤
+          </button>
         </div>
 
-        {/* Emoji Picker */}
         {showEmojiPicker && (
           <div className="emoji-picker">
-            {EMOJI_PICKER.map(e => (
-              <button key={e} className="emoji-btn" onClick={() => {
-                setInputText(p => p + e);
-                textareaRef.current?.focus();
-              }}>
-                {e}
+            {EMOJI_PICKER.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                className="emoji-btn"
+                onClick={() => {
+                  setInputText((previous) => `${previous}${emoji}`);
+                  textareaRef.current?.focus();
+                }}
+              >
+                {emoji}
               </button>
             ))}
           </div>
         )}
-      </div>
-    </div>
+      </footer>
+    </main>
   );
-};
-
-export default ChatArea;
+}

@@ -367,24 +367,78 @@ input, textarea { font-family: 'Inter', sans-serif; }
   position: relative;
 }
 
-/* Reply preview in composer */
+/* Reply preview above the composer */
 .composer-reply {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px 4px;
   cursor: pointer;
-  animation: slideDown 0.18s cubic-bezier(0.22,1,0.36,1);
+  background: rgba(255, 255, 255, 0.018);
+  transition: background 0.15s ease;
 }
-@keyframes slideDown { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
-.composer-reply-bar { width: 3px; height: 36px; background: var(--accent); border-radius: 2px; flex-shrink: 0; }
-.composer-reply-content { flex: 1; min-width: 0; }
-.composer-reply-label { font-size: 11px; color: var(--accent-hover); font-weight: 600; }
-.composer-reply-text { display: block; font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.composer-reply:hover,
+.composer-reply:focus-visible {
+  outline: none;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.composer-reply-bar {
+  width: 3px;
+  height: 38px;
+  min-width: 3px;
+  border-radius: 999px;
+  background: var(--accent, #6b4cff);
+}
+
+.composer-reply-content {
+  min-width: 0;
+  flex: 1;
+}
+
+.composer-reply-label {
+  display: block;
+  margin-bottom: 2px;
+  overflow: hidden;
+  color: var(--accent-hover, #9b8cff);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-reply-text {
+  display: block;
+  overflow: hidden;
+  color: var(--text-secondary, #aaa7b6);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer-reply-close {
-  background: none; border: none; color: var(--text-secondary); font-size: 14px;
-  width: 24px; height: 24px; display: flex; justify-content: center; align-items: center;
-  border-radius: 50%; transition: 0.15s;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  color: var(--text-secondary, #aaa7b6);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  transition: color 0.15s ease, background 0.15s ease;
 }
-.composer-reply-close:hover { color: #fff; background: rgba(255,255,255,0.1); }
+
+.composer-reply-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
 
 /* Main composer row */
 .composer-row {
@@ -1209,20 +1263,84 @@ input, textarea { font-family: 'Inter', sans-serif; }
 }
 .reaction-chip.reacted span { color: var(--accent-hover); }
 
-/* ========== REPLY QUOTE ========== */
+/* Reply preview above a message bubble */
 .reply-quote {
-  display: flex; align-items: stretch; gap: 8px; max-width: 100%;
-  margin-bottom: 4px; cursor: pointer;
-  padding: 4px 8px; border-radius: 10px;
-  transition: background 0.12s;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 9px;
+  margin: 0 0 5px;
+  padding: 6px 8px;
+  overflow: hidden;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.035);
+  border: 0;
+  border-radius: 8px;
+  transition: background 0.15s ease, transform 0.15s ease;
 }
-.reply-quote:hover { background: rgba(255,255,255,0.05); }
-.reply-quote-bar { width: 3px; border-radius: 2px; background: var(--accent); flex-shrink: 0; }
-.reply-quote-content { min-width: 0; }
-.reply-quote-name { display: block; font-size: 11px; font-weight: 600; color: var(--accent-hover); margin-bottom: 2px; }
+
+.reply-quote:hover,
+.reply-quote:focus-visible {
+  outline: none;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.reply-quote:active { transform: scale(0.99); }
+
+.reply-quote-bar {
+  width: 3px;
+  min-width: 3px;
+  border-radius: 999px;
+  background: var(--accent, #6b4cff);
+}
+
+.msg-group--own .reply-quote-bar { background: #8ee6ff; }
+
+.reply-quote-content {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.reply-quote-label {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: rgba(190, 185, 210, 0.7);
+}
+
+.reply-quote-name {
+  overflow: hidden;
+  color: var(--accent-hover, #9b8cff);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg-group--own .reply-quote-name { color: #8ee6ff; }
+
 .reply-quote-text {
-  font-size: 12px; color: var(--text-secondary); display: -webkit-box;
-  overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.35;
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(225, 223, 235, 0.68);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.reply-quote-text--deleted {
+  font-style: italic;
+  opacity: 0.75;
 }
 
 /* Highlight animation for scrolled-to message */

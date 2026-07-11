@@ -3,12 +3,13 @@ import React from 'react';
 const EMOJI_QUICK = ['👍', '❤️', '😂', '😮', '😢', '🔥', '🎉', '👀'];
 
 function highlightText(text, query) {
-  if (!query || !query.trim()) return text;
+  if (!query?.trim()) return text;
+
   try {
-    const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
-    return parts.map((part, i) =>
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return String(text || '').split(new RegExp(`(${escaped})`, 'gi')).map((part, index) =>
       part.toLowerCase() === query.toLowerCase()
-        ? <mark key={i} className="search-highlight">{part}</mark>
+        ? <mark key={index} className="search-highlight">{part}</mark>
         : part
     );
   } catch {
@@ -16,42 +17,85 @@ function highlightText(text, query) {
   }
 }
 
+function truncate(text, limit = 120) {
+  const value = String(text || '');
+  return value.length > limit ? `${value.slice(0, limit)}…` : value;
+}
+
+function ReplyQuote({ msg, currentUserId, contactName, onScrollTo }) {
+  const originalIsDeleted = Number(msg.reply_is_deleted_for_all) === 1;
+  const originalSenderId = Number(msg.reply_sender_id);
+  const isOwnOriginal = originalSenderId === Number(currentUserId);
+
+  const senderName = isOwnOriginal
+    ? 'Вы'
+    : (msg.reply_sender_name || contactName || 'Пользователь');
+
+  const previewText = originalIsDeleted
+    ? 'Сообщение удалено'
+    : (msg.reply_text ? truncate(msg.reply_text) : 'Исходное сообщение недоступно');
+
+  const handleClick = () => {
+    console.log('[ReplyQuote] scroll to original message', {
+      messageId: msg.id,
+      replyToId: msg.reply_to_id,
+      replyText: msg.reply_text,
+    });
+
+    onScrollTo(msg.reply_to_id);
+  };
+
+  return (
+    <button
+      type="button"
+      className="reply-quote"
+      onClick={handleClick}
+      title="Перейти к исходному сообщению"
+    >
+      <span className="reply-quote-bar" aria-hidden="true" />
+
+      <span className="reply-quote-content">
+        <span className="reply-quote-label">В ответ на</span>
+        <span className="reply-quote-name">{senderName}</span>
+        <span className={`reply-quote-text ${originalIsDeleted ? 'reply-quote-text--deleted' : ''}`}>
+          {previewText}
+        </span>
+      </span>
+    </button>
+  );
+}
+
 function ReactionBar({ reactions, currentUserId, messageId, onToggle }) {
-  if (!reactions || reactions.length === 0) return null;
-  const grouped = {};
-  reactions.forEach(r => {
-    if (!grouped[r.emoji]) grouped[r.emoji] = { count: 0, users: [], myReacted: false };
-    grouped[r.emoji].count++;
-    grouped[r.emoji].users.push(r.username);
-    if (Number(r.user_id) === Number(currentUserId)) grouped[r.emoji].myReacted = true;
-  });
+  if (!Array.isArray(reactions) || reactions.length === 0) return null;
+
+  const grouped = reactions.reduce((result, reaction) => {
+    if (!result[reaction.emoji]) {
+      result[reaction.emoji] = { count: 0, users: [], myReacted: false };
+    }
+
+    result[reaction.emoji].count += 1;
+    result[reaction.emoji].users.push(reaction.username);
+
+    if (Number(reaction.user_id) === Number(currentUserId)) {
+      result[reaction.emoji].myReacted = true;
+    }
+
+    return result;
+  }, {});
+
   return (
     <div className="reaction-bar">
       {Object.entries(grouped).map(([emoji, data]) => (
         <button
           key={emoji}
+          type="button"
           className={`reaction-chip ${data.myReacted ? 'reacted' : ''}`}
+          title={data.users.filter(Boolean).join(', ')}
           onClick={() => onToggle(messageId, emoji, data.myReacted)}
-          title={data.users.join(', ')}
         >
           {emoji} <span>{data.count}</span>
         </button>
       ))}
-    </div>
-  );
-}
-
-function ReplyQuote({ replyText, replySenderId, currentUserId, contactName, onClick, isDeleted }) {
-  const isOwn = Number(replySenderId) === Number(currentUserId);
-  return (
-    <div className="reply-quote" onClick={onClick}>
-      <div className="reply-quote-bar" />
-      <div className="reply-quote-content">
-        <span className="reply-quote-name">{isOwn ? 'Вы' : contactName}</span>
-        <span className="reply-quote-text">
-          {isDeleted ? <i>Сообщение удалено</i> : (replyText?.length > 80 ? replyText.slice(0, 80) + '…' : replyText)}
-        </span>
-      </div>
     </div>
   );
 }
@@ -72,55 +116,68 @@ export default function Message({
   handleReactionToggle,
   handleContextMenu,
   isHighlighted,
-  searchQuery = ''
+  searchQuery = '',
 }) {
   let posClass = 'msg-mid';
+
   if (isFirst && isLast) posClass = 'msg-solo';
   else if (isFirst) posClass = 'msg-first';
   else if (isLast) posClass = 'msg-last';
 
-  const msgReactions = localReactions[msg.id] || [];
-  // reply_to_id is the authoritative signal. Reply metadata is display data and
-  // can be absent briefly for a newly received Socket.IO event.
-  const hasReply = Number(msg.reply_to_id) > 0;
+  const replyToId = Number(msg.reply_to_id);
 
-  // SQLite returns 0/1 as integers — convert to booleans explicitly
+  // Главное и единственное условие для показа preview ответа.
+  const hasReply = Number.isInteger(replyToId) && replyToId > 0;
+
   const isDeletedForAll = Number(msg.is_deleted_for_all) === 1;
   const isEdited = Number(msg.is_edited) === 1;
   const isForwarded = Number(msg.is_forwarded) === 1;
   const isRead = Number(msg.is_read) === 1;
   const isDelivered = Number(msg.is_delivered) === 1;
+  const reactions = localReactions[msg.id] || msg.reactions || [];
+
+  if (hasReply) {
+    console.log('[Message] rendering reply quote', {
+      messageId: msg.id,
+      replyToId: msg.reply_to_id,
+      replyText: msg.reply_text,
+      replySenderName: msg.reply_sender_name,
+    });
+  }
 
   return (
-    <div
+    <article
       className={`msg-bubble-wrap ${isHighlighted ? 'msg-search-active' : ''}`}
-      ref={el => { if (el) msgRefs.current[msg.id] = el; }}
+      ref={(element) => {
+        if (element) msgRefs.current[msg.id] = element;
+      }}
+      data-message-id={msg.id}
     >
-      {/* Forwarded indicator */}
       {isForwarded && (
         <div className={`msg-forwarded-indicator ${isOwn ? 'msg-forwarded-indicator--own' : ''}`}>
-          <span>↗ Переслано</span>
+          ↗ Переслано
         </div>
       )}
 
-      {/* Reply quote */}
       {hasReply && (
         <ReplyQuote
-          replyText={msg.reply_text}
-          replySenderId={msg.reply_sender_id}
+          msg={msg}
           currentUserId={currentUser.userId}
-          contactName={msg.reply_sender_name || contactName}
-          isDeleted={Number(msg.reply_is_deleted_for_all) === 1}
-          onClick={() => scrollToMsg(msg.reply_to_id)}
+          contactName={contactName}
+          onScrollTo={scrollToMsg}
         />
       )}
 
       <div className="msg-bubble-row">
-        {/* Quick react — hidden for deleted messages */}
         {!isDeletedForAll && (
           <div className={`quick-react ${isOwn ? 'quick-react--left' : 'quick-react--right'}`}>
-            {EMOJI_QUICK.map(emoji => (
-              <button key={emoji} className="quick-react-btn" onClick={() => handleQuickReact(msg, emoji)}>
+            {EMOJI_QUICK.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                className="quick-react-btn"
+                onClick={() => handleQuickReact(msg, emoji)}
+              >
                 {emoji}
               </button>
             ))}
@@ -128,54 +185,71 @@ export default function Message({
         )}
 
         <div
-          className={`msg-bubble ${isOwn ? 'msg-bubble--own' : 'msg-bubble--other'} ${posClass} msg-bubble--${settings?.bubbleStyle || 'rounded'} ${isDeletedForAll ? 'msg-deleted' : ''}`}
-          onContextMenu={e => handleContextMenu(e, msg)}
+          className={[
+            'msg-bubble',
+            isOwn ? 'msg-bubble--own' : 'msg-bubble--other',
+            posClass,
+            `msg-bubble--${settings?.bubbleStyle || 'rounded'}`,
+            isDeletedForAll ? 'msg-deleted' : '',
+          ].join(' ')}
+          onContextMenu={(event) => handleContextMenu(event, msg)}
         >
           <span className="msg-bubble__text">
             {isDeletedForAll
-              ? <i style={{ opacity: 0.7 }}>Сообщение удалено</i>
-              : highlightText(msg.text || '', searchQuery)
-            }
+              ? <i>Сообщение удалено</i>
+              : highlightText(msg.text || '', searchQuery)}
           </span>
+
           <span className="msg-bubble__meta">
             {isEdited && !isDeletedForAll && (
               <span className="msg-bubble__edited">(изменено)</span>
             )}
+
             <span className="msg-bubble__time">{msg.time}</span>
+
             {isOwn && (
               <span
-                className={`msg-bubble__status ${isRead ? 'status-read' : isDelivered ? 'status-delivered' : ''}`}
+                className={`msg-bubble__status ${
+                  isRead ? 'status-read' : isDelivered ? 'status-delivered' : ''
+                }`}
                 title={isRead ? 'Прочитано' : isDelivered ? 'Доставлено' : 'Отправлено'}
               >
-                {isRead ? '✓✓' : isDelivered ? '✓✓' : '✓'}
+                {isRead || isDelivered ? '✓✓' : '✓'}
               </span>
             )}
           </span>
         </div>
 
-        {/* Reply button */}
         {!isDeletedForAll && (
           <button
+            type="button"
             className="msg-action-btn msg-reply-btn"
             title="Ответить"
-            onClick={() => setReplyTo(msg)}
+            onClick={() => {
+              console.log('[Message] reply button clicked', {
+                messageId: msg.id,
+                text: msg.text,
+              });
+
+              setReplyTo(msg);
+            }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
+              <polyline points="9 17 4 12 9 7" />
+              <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
             </svg>
           </button>
         )}
       </div>
 
-      {/* Reactions bar */}
       {!isDeletedForAll && (
         <ReactionBar
-          reactions={msgReactions}
+          reactions={reactions}
           currentUserId={currentUser.userId}
           messageId={msg.id}
           onToggle={handleReactionToggle}
         />
       )}
-    </div>
+    </article>
   );
 }
