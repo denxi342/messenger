@@ -2,21 +2,6 @@ import React from 'react';
 
 const EMOJI_QUICK = ['👍', '❤️', '😂', '😮', '😢', '🔥', '🎉', '👀'];
 
-function highlightText(text, query) {
-  if (!query?.trim()) return text;
-
-  try {
-    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return String(text || '').split(new RegExp(`(${escaped})`, 'gi')).map((part, index) =>
-      part.toLowerCase() === query.toLowerCase()
-        ? <mark key={index} className="search-highlight">{part}</mark>
-        : part
-    );
-  } catch {
-    return text;
-  }
-}
-
 function truncate(text, limit = 120) {
   const value = String(text || '');
   return value.length > limit ? `${value.slice(0, limit)}…` : value;
@@ -24,25 +9,19 @@ function truncate(text, limit = 120) {
 
 function ReplyQuote({ msg, currentUserId, contactName, onScrollTo }) {
   const originalIsDeleted = Number(msg.reply_is_deleted_for_all) === 1;
-  const originalSenderId = Number(msg.reply_sender_id);
+  const originalSenderId = Number(msg.reply_sender_id || 0);
   const isOwnOriginal = originalSenderId === Number(currentUserId);
 
-  const senderName = isOwnOriginal
-    ? 'Вы'
-    : (msg.reply_sender_name || contactName || 'Пользователь');
+  const senderName = isOwnOriginal ? 'Вы' : (msg.reply_sender_name || contactName || 'Пользователь');
 
   const previewText = originalIsDeleted
     ? 'Сообщение удалено'
-    : (msg.reply_text ? truncate(msg.reply_text) : 'Исходное сообщение недоступно');
+    : truncate(msg.reply_text || 'Сообщение недоступно');
 
   const handleClick = () => {
-    console.log('[ReplyQuote] scroll to original message', {
-      messageId: msg.id,
-      replyToId: msg.reply_to_id,
-      replyText: msg.reply_text,
-    });
-
-    onScrollTo(msg.reply_to_id);
+    if (msg.reply_to_id) {
+      onScrollTo(msg.reply_to_id);
+    }
   };
 
   return (
@@ -55,8 +34,7 @@ function ReplyQuote({ msg, currentUserId, contactName, onScrollTo }) {
       <span className="reply-quote-bar" aria-hidden="true" />
 
       <span className="reply-quote-content">
-        <span className="reply-quote-label">В ответ на</span>
-        <span className="reply-quote-name">{senderName}</span>
+        <span className="reply-quote-label">В ответ на {senderName}</span>
         <span className={`reply-quote-text ${originalIsDeleted ? 'reply-quote-text--deleted' : ''}`}>
           {previewText}
         </span>
@@ -72,14 +50,11 @@ function ReactionBar({ reactions, currentUserId, messageId, onToggle }) {
     if (!result[reaction.emoji]) {
       result[reaction.emoji] = { count: 0, users: [], myReacted: false };
     }
-
     result[reaction.emoji].count += 1;
     result[reaction.emoji].users.push(reaction.username);
-
     if (Number(reaction.user_id) === Number(currentUserId)) {
       result[reaction.emoji].myReacted = true;
     }
-
     return result;
   }, {});
 
@@ -119,38 +94,32 @@ export default function Message({
   searchQuery = '',
 }) {
   let posClass = 'msg-mid';
-
   if (isFirst && isLast) posClass = 'msg-solo';
   else if (isFirst) posClass = 'msg-first';
   else if (isLast) posClass = 'msg-last';
 
   const replyToId = Number(msg.reply_to_id);
-
-  // Главное и единственное условие для показа preview ответа.
-  const hasReply = Number.isInteger(replyToId) && replyToId > 0;
+  const hasReply = replyToId > 0;   // Самое надёжное условие
 
   const isDeletedForAll = Number(msg.is_deleted_for_all) === 1;
   const isEdited = Number(msg.is_edited) === 1;
   const isForwarded = Number(msg.is_forwarded) === 1;
-  const isRead = Number(msg.is_read) === 1;
-  const isDelivered = Number(msg.is_delivered) === 1;
   const reactions = localReactions[msg.id] || msg.reactions || [];
 
+  // Отладка
   if (hasReply) {
-    console.log('[Message] rendering reply quote', {
+    console.log('[Message] Рендер ответа:', {
       messageId: msg.id,
-      replyToId: msg.reply_to_id,
+      replyToId: replyToId,
       replyText: msg.reply_text,
-      replySenderName: msg.reply_sender_name,
+      replySender: msg.reply_sender_name
     });
   }
 
   return (
     <article
       className={`msg-bubble-wrap ${isHighlighted ? 'msg-search-active' : ''}`}
-      ref={(element) => {
-        if (element) msgRefs.current[msg.id] = element;
-      }}
+      ref={(element) => { if (element) msgRefs.current[msg.id] = element; }}
       data-message-id={msg.id}
     >
       {isForwarded && (
@@ -159,6 +128,7 @@ export default function Message({
         </div>
       )}
 
+      {/* Превью ответа */}
       {hasReply && (
         <ReplyQuote
           msg={msg}
@@ -195,28 +165,12 @@ export default function Message({
           onContextMenu={(event) => handleContextMenu(event, msg)}
         >
           <span className="msg-bubble__text">
-            {isDeletedForAll
-              ? <i>Сообщение удалено</i>
-              : highlightText(msg.text || '', searchQuery)}
+            {isDeletedForAll ? <i>Сообщение удалено</i> : msg.text || ''}
           </span>
 
           <span className="msg-bubble__meta">
-            {isEdited && !isDeletedForAll && (
-              <span className="msg-bubble__edited">(изменено)</span>
-            )}
-
-            <span className="msg-bubble__time">{msg.time}</span>
-
-            {isOwn && (
-              <span
-                className={`msg-bubble__status ${
-                  isRead ? 'status-read' : isDelivered ? 'status-delivered' : ''
-                }`}
-                title={isRead ? 'Прочитано' : isDelivered ? 'Доставлено' : 'Отправлено'}
-              >
-                {isRead || isDelivered ? '✓✓' : '✓'}
-              </span>
-            )}
+            {isEdited && !isDeletedForAll && <span className="msg-bubble__edited">(изменено)</span>}
+            <span className="msg-bubble__time">{msg.time || msg.created_at?.slice(11, 16)}</span>
           </span>
         </div>
 
@@ -225,14 +179,7 @@ export default function Message({
             type="button"
             className="msg-action-btn msg-reply-btn"
             title="Ответить"
-            onClick={() => {
-              console.log('[Message] reply button clicked', {
-                messageId: msg.id,
-                text: msg.text,
-              });
-
-              setReplyTo(msg);
-            }}
+            onClick={() => setReplyTo(msg)}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <polyline points="9 17 4 12 9 7" />
