@@ -47,6 +47,35 @@ const ContactProfile = ({ contact, token, onlineUsers, onClose, onOpenChat, onCo
     setTimeout(() => { onContactRemoved(); onClose(); }, 1200);
   };
 
+  const [isMuted, setIsMuted] = useState(false);
+
+  useEffect(() => {
+    try {
+      const mutedList = JSON.parse(localStorage.getItem('octave_muted_conversations') || '[]');
+      setIsMuted(mutedList.includes(String(contact.id)));
+    } catch (e) {
+      console.error('Failed to read muted chats:', e);
+    }
+  }, [contact.id]);
+
+  const handleToggleMute = () => {
+    try {
+      const mutedList = JSON.parse(localStorage.getItem('octave_muted_conversations') || '[]');
+      const idStr = String(contact.id);
+      let nextMuted;
+      if (mutedList.includes(idStr)) {
+        nextMuted = mutedList.filter(id => id !== idStr);
+        setIsMuted(false);
+      } else {
+        nextMuted = [...mutedList, idStr];
+        setIsMuted(true);
+      }
+      localStorage.setItem('octave_muted_conversations', JSON.stringify(nextMuted));
+    } catch (e) {
+      console.error('Failed to toggle mute:', e);
+    }
+  };
+
   const formatDate = (dt) => {
     if (!dt) return '';
     return new Date(dt).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -172,14 +201,38 @@ const ContactProfile = ({ contact, token, onlineUsers, onClose, onOpenChat, onCo
             <div className="contact-profile-footer">
               {!confirmAction ? (
                 <>
-                  <button 
-                    className="action-chat-btn"
-                    onClick={() => { onOpenChat(contact); onClose(); }}
-                  >
-                    💬 Написать сообщение
-                  </button>
+                  <div className="action-main-buttons" style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '8px' }}>
+                    <button 
+                      className="action-chat-btn"
+                      onClick={() => { onOpenChat(contact); onClose(); }}
+                    >
+                      💬 Написать сообщение
+                    </button>
+                    <button 
+                      className={`action-mute-btn ${isMuted ? 'muted' : ''}`}
+                      onClick={handleToggleMute}
+                      style={{
+                        background: isMuted ? 'rgba(239, 68, 68, 0.1)' : 'rgba(255, 255, 255, 0.04)',
+                        border: isMuted ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid rgba(255, 255, 255, 0.06)',
+                        color: isMuted ? '#ef4444' : 'var(--text-secondary)',
+                        padding: '12px 16px',
+                        borderRadius: '12px',
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        transition: 'all 0.2s',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {isMuted ? '🔊 Включить уведомления' : '🔕 Выключить уведомления'}
+                    </button>
+                  </div>
 
-                  <div className="action-danger-row">
+                  <div className="action-danger-row" style={{ marginTop: '12px' }}>
                     <button className="action-danger-btn-outline" onClick={() => setConfirmAction('remove')}>
                       Удалить
                     </button>
@@ -189,6 +242,7 @@ const ContactProfile = ({ contact, token, onlineUsers, onClose, onOpenChat, onCo
                   </div>
                 </>
               ) : (
+
                 <div className="confirm-card-dialog">
                   <p className="confirm-dialog-title">
                     {confirmAction === 'remove' 

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const { autoUpdater } = require('electron-updater');
 
@@ -25,35 +25,17 @@ autoUpdater.logger = {
 // Configure autoUpdater
 autoUpdater.autoDownload = false; // Do not download automatically, ask the user first
 
+let mainWindow = null;
+
 autoUpdater.on('checking-for-update', () => {
   log('STATUS', 'Проверка наличия обновлений...');
 });
 
 autoUpdater.on('update-available', (info) => {
   log('STATUS', `Найдено обновление: версия ${info.version}`);
-  
-  dialog.showMessageBox({
-    type: 'info',
-    title: 'Доступно обновление',
-    message: `Найдена новая версия Octave App (${info.version}). Хотите скачать обновление?`,
-    buttons: ['Скачать обновление', 'Позже'],
-    defaultId: 0,
-    cancelId: 1
-  }).then((result) => {
-    if (result.response === 0) {
-      log('STATUS', 'Пользователь нажал "Скачать обновление". Запуск загрузки...');
-      
-      // Call downloadUpdate() and capture any promise rejections
-      autoUpdater.downloadUpdate().then((downloadPromise) => {
-        log('STATUS', 'Загрузка успешно инициализирована.');
-      }).catch((err) => {
-        log('ERROR', `Исключение при вызове downloadUpdate: ${err.message}`);
-        dialog.showErrorBox('Ошибка загрузки', `Не удалось начать загрузку: ${err.message}\n\n${err.stack || ''}`);
-      });
-    } else {
-      log('STATUS', 'Пользователь отказался от загрузки обновления.');
-    }
-  });
+  if (mainWindow) {
+    mainWindow.webContents.send('update-available', info.version);
+  }
 });
 
 autoUpdater.on('update-not-available', (info) => {
@@ -66,32 +48,36 @@ autoUpdater.on('download-progress', (progressObj) => {
 
 autoUpdater.on('update-downloaded', (info) => {
   log('STATUS', `Обновление версии ${info.version} загружено и готово к установке.`);
-  
-  dialog.showMessageBox({
-    type: 'info',
-    title: 'Обновление готово',
-    message: `Новая версия Octave (${info.version}) успешно загружена. Перезапустить приложение для установки?`,
-    buttons: ['Установить и перезапустить', 'Позже'],
-    defaultId: 0,
-    cancelId: 1
-  }).then((result) => {
-    if (result.response === 0) {
-      log('STATUS', 'Пользователь выбрал установку. Перезапуск...');
-      autoUpdater.quitAndInstall();
-    } else {
-      log('STATUS', 'Пользователь отложил установку обновления.');
-    }
-  });
+  if (mainWindow) {
+    mainWindow.webContents.send('update-downloaded', info.version);
+  }
 });
 
 autoUpdater.on('error', (err) => {
   const errMsg = err.stack || err.message || String(err);
   log('ERROR', `Ошибка автоматического обновления: ${errMsg}`);
-  dialog.showErrorBox('Ошибка авто-обновления', `Произошла ошибка при обновлении:\n\n${errMsg}`);
+  if (mainWindow) {
+    mainWindow.webContents.send('update-error', errMsg);
+  }
+});
+
+// IPC handlers for updater actions
+ipcMain.on('download-update', () => {
+  log('STATUS', 'Пользователь запросил загрузку обновления через IPC.');
+  autoUpdater.downloadUpdate().then(() => {
+    log('STATUS', 'Загрузка успешно инициализирована.');
+  }).catch((err) => {
+    log('ERROR', `Исключение при вызове downloadUpdate: ${err.message}`);
+  });
+});
+
+ipcMain.on('restart-and-install', () => {
+  log('STATUS', 'Пользователь запросил установку и перезапуск через IPC.');
+  autoUpdater.quitAndInstall();
 });
 
 function createWindow() {
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
@@ -110,10 +96,14 @@ function createWindow() {
 
   const isDev = process.env.NODE_ENV === 'development';
   if (isDev) {
-    win.loadURL('http://localhost:5173');
+    mainWindow.loadURL('http://localhost:5173');
   } else {
-    win.loadFile(path.join(__dirname, 'dist', 'index.html'));
+    mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
   }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
 app.whenReady().then(() => {
@@ -124,6 +114,7 @@ app.whenReady().then(() => {
   autoUpdater.checkForUpdatesAndNotify().catch(err => {
     log('ERROR', `Не удалось запустить проверку обновлений: ${err.stack || err.message}`);
   });
+
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

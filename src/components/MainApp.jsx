@@ -31,6 +31,45 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
 
   const socketRef = useRef(null);
   const activeChatRef = useRef(null);
+  const contactsRef = useRef(contacts);
+
+  useEffect(() => {
+    contactsRef.current = contacts;
+  }, [contacts]);
+
+  // Electron auto-updater listeners
+  useEffect(() => {
+    try {
+      const electron = window.require ? window.require('electron') : null;
+      if (electron && electron.ipcRenderer) {
+        const handleUpdateAvailable = (event, version) => {
+          window.notify?.update('available', version, {
+            onDownload: () => {
+              electron.ipcRenderer.send('download-update');
+            }
+          });
+        };
+
+        const handleUpdateDownloaded = (event, version) => {
+          window.notify?.update('downloaded', version, {
+            onRestart: () => {
+              electron.ipcRenderer.send('restart-and-install');
+            }
+          });
+        };
+
+        electron.ipcRenderer.on('update-available', handleUpdateAvailable);
+        electron.ipcRenderer.on('update-downloaded', handleUpdateDownloaded);
+
+        return () => {
+          electron.ipcRenderer.off('update-available', handleUpdateAvailable);
+          electron.ipcRenderer.off('update-downloaded', handleUpdateDownloaded);
+        };
+      }
+    } catch (e) {
+      console.warn('Auto updater IPC hook error:', e);
+    }
+  }, []);
 
   const loadContacts = async () => {
     try {
@@ -101,6 +140,19 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
     const SOCKET_URL = import.meta.env.VITE_SOCKET_URL === undefined ? 'http://localhost:3001' : import.meta.env.VITE_SOCKET_URL;
     socketRef.current = io(SOCKET_URL, { auth: { token: user.token } });
 
+    let wasDisconnected = false;
+    socketRef.current.on('connect', () => {
+      if (wasDisconnected) {
+        window.notify?.connection('restored');
+        wasDisconnected = false;
+      }
+    });
+
+    socketRef.current.on('disconnect', () => {
+      wasDisconnected = true;
+      window.notify?.connection('lost');
+    });
+
     socketRef.current.on('connect_error', (err) => {
       if (err.message === 'Authentication error') onLogout();
     });
@@ -143,6 +195,36 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
       const chatIsOpen = activeChatRef.current && Number(activeChatRef.current.id) === contactId;
       if (isIncoming && !chatIsOpen) {
         setUnreadCounts(prev => ({ ...prev, [contactId]: (prev[contactId] || 0) + 1 }));
+
+        // Trigger custom message notification
+        const contact = contactsRef.current.find(c => Number(c.id) === contactId);
+        const displayName = contact ? (contact.display_name || contact.username) : msg.senderName || 'Anonymous';
+        let bodyText = msg.text;
+        if (msg.media_type === 'image') {
+          bodyText = '📷 Фото';
+        } else if (msg.media_type === 'video') {
+          bodyText = '🎥 Видео';
+        }
+
+        window.notify?.message(displayName, bodyText, contactId, {
+          onClick: () => {
+            const currentContact = contactsRef.current.find(c => Number(c.id) === contactId);
+            if (currentContact) setActiveChat(currentContact);
+          },
+          onReply: () => {
+            const currentContact = contactsRef.current.find(c => Number(c.id) === contactId);
+            if (currentContact) {
+              setActiveChat(currentContact);
+              setTimeout(() => {
+                const textarea = document.querySelector('.composer-input');
+                if (textarea) textarea.focus();
+              }, 150);
+            }
+          },
+          onMarkAsRead: () => {
+            socketRef.current?.emit('markAsRead', contactId);
+          }
+        });
       } else if (isIncoming && chatIsOpen) {
         // Auto mark as read if chat is open
         socketRef.current?.emit('markAsRead', contactId);

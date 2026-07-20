@@ -1,7 +1,7 @@
 {
   "name": "octave-app",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Octave Application",
   "author": "Denxi",
   "type": "module",
