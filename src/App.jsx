@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import AuthScreen from './components/AuthScreen';
 import MainApp from './components/MainApp';
+import SplashScreen from './components/SplashScreen';
 
 function App() {
   const [user, setUser] = useState(null);
+  const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
     let savedUser = localStorage.getItem('octave_user');
@@ -38,11 +40,19 @@ function App() {
     localStorage.setItem('octave_user', JSON.stringify(updated));
   };
 
-  if (!user) {
-    return <AuthScreen onLogin={handleLogin} />;
-  }
+  return (
+    <>
+      {showSplash && (
+        <SplashScreen onComplete={() => setShowSplash(false)} />
+      )}
 
-  return <MainApp user={user} onLogout={handleLogout} onUserUpdate={handleUserUpdate} />;
+      {!user ? (
+        <AuthScreen onLogin={handleLogin} />
+      ) : (
+        <MainApp user={user} onLogout={handleLogout} onUserUpdate={handleUserUpdate} />
+      )}
+    </>
+  );
 }
 
 export default App;
