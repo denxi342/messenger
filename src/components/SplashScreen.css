@@ -68,12 +68,13 @@
   margin: 0;
   line-height: 1.1;
   
-  /* Fluid moving text gradient */
-  background: linear-gradient(90deg, #9ab6ff, #d3a4ff, #f48ca7, #9ab6ff);
-  background-size: 200% auto;
+  /* Smooth moving gradient — 400% technique works in Electron WebKit */
+  background: linear-gradient(90deg, #9ab6ff 0%, #d3a4ff 25%, #f48ca7 50%, #d3a4ff 75%, #9ab6ff 100%);
+  background-size: 400% 100%;
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: fluidGradient 4s linear infinite;
+  animation: gradientFlow 3s ease-in-out infinite;
 
   /* Smooth reveal */
   opacity: 0;
@@ -122,11 +123,8 @@
 /* ─────────────────────────────────────────
    Keyframes
    ───────────────────────────────────────── */
-@keyframes fluidGradient {
-  0% {
-    background-position: 0% center;
-  }
-  100% {
-    background-position: 200% center;
-  }
+@keyframes gradientFlow {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
