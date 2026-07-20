@@ -1,5 +1,43 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
+const { autoUpdater } = require('electron-updater');
+
+// Configure autoUpdater
+autoUpdater.autoDownload = false; // Do not download automatically, ask first
+
+autoUpdater.on('update-available', (info) => {
+  dialog.showMessageBox({
+    type: 'info',
+    title: 'Доступно обновление',
+    message: `Найдена новая версия Octave App (${info.version}). Хотите скачать обновление?`,
+    buttons: ['Скачать обновление', 'Позже'],
+    defaultId: 0,
+    cancelId: 1
+  }).then((result) => {
+    if (result.response === 0) {
+      autoUpdater.downloadUpdate();
+    }
+  });
+});
+
+autoUpdater.on('update-downloaded', () => {
+  dialog.showMessageBox({
+    type: 'info',
+    title: 'Обновление загружено',
+    message: 'Новая версия готова к установке. Перезапустить приложение сейчас?',
+    buttons: ['Установить и перезапустить', 'Позже'],
+    defaultId: 0,
+    cancelId: 1
+  }).then((result) => {
+    if (result.response === 0) {
+      autoUpdater.quitAndInstall();
+    }
+  });
+});
+
+autoUpdater.on('error', (err) => {
+  console.error('Ошибка автоматического обновления:', err);
+});
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -22,15 +60,20 @@ function createWindow() {
   const isDev = process.env.NODE_ENV === 'development';
   if (isDev) {
     win.loadURL('http://localhost:5173');
-    // win.webContents.openDevTools();
   } else {
     win.loadFile(path.join(__dirname, 'dist', 'index.html'));
-    win.webContents.openDevTools();
   }
 }
 
 app.whenReady().then(() => {
   createWindow();
+
+  // Trigger check for updates (only in packaged app/production)
+  if (process.env.NODE_ENV !== 'development') {
+    autoUpdater.checkForUpdatesAndNotify().catch(err => {
+      console.error('Не удалось запустить проверку обновлений:', err);
+    });
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

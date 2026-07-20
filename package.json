@@ -19,6 +19,11 @@
     "directories": {
       "output": "release"
     },
+    "publish": {
+      "provider": "github",
+      "owner": "denxi342",
+      "repo": "messenger"
+    },
     "files": [
       "dist/**/*",
       "main.cjs",
@@ -29,6 +34,7 @@
     }
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "socket.io-client": "^4.8.3"
