@@ -838,7 +838,7 @@ io.on('connection', (socket) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
         [
           userId, recipientId, bodyText, time, isE2ee ? 1 : 0, normalizedReplyToId, isForwarded ? 1 : 0,
-          mediaUrl, mediaType, mediaWidth, mediaHeight, mediaDuration, mediaSize, mediaName, mediaThumbnail
+          mediaUrl ?? null, mediaType ?? null, mediaWidth ?? null, mediaHeight ?? null, mediaDuration ?? null, mediaSize ?? null, mediaName ?? null, mediaThumbnail ?? null
         ]
       );
       const persisted = await db.get(
