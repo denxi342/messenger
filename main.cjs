@@ -23,14 +23,7 @@ autoUpdater.logger = {
 };
 
 // Configure autoUpdater
-autoUpdater.autoDownload = true;
-
-// Programmatically set feed URL to guarantee it points to the correct repo
-autoUpdater.setFeedURL({
-  provider: 'github',
-  owner: 'denxi342',
-  repo: 'messenger'
-});
+autoUpdater.autoDownload = false; // Do not download automatically, ask the user first
 
 autoUpdater.on('checking-for-update', () => {
   log('STATUS', 'Проверка наличия обновлений...');
@@ -38,6 +31,29 @@ autoUpdater.on('checking-for-update', () => {
 
 autoUpdater.on('update-available', (info) => {
   log('STATUS', `Найдено обновление: версия ${info.version}`);
+  
+  dialog.showMessageBox({
+    type: 'info',
+    title: 'Доступно обновление',
+    message: `Найдена новая версия Octave App (${info.version}). Хотите скачать обновление?`,
+    buttons: ['Скачать обновление', 'Позже'],
+    defaultId: 0,
+    cancelId: 1
+  }).then((result) => {
+    if (result.response === 0) {
+      log('STATUS', 'Пользователь нажал "Скачать обновление". Запуск загрузки...');
+      
+      // Call downloadUpdate() and capture any promise rejections
+      autoUpdater.downloadUpdate().then((downloadPromise) => {
+        log('STATUS', 'Загрузка успешно инициализирована.');
+      }).catch((err) => {
+        log('ERROR', `Исключение при вызове downloadUpdate: ${err.message}`);
+        dialog.showErrorBox('Ошибка загрузки', `Не удалось начать загрузку: ${err.message}\n\n${err.stack || ''}`);
+      });
+    } else {
+      log('STATUS', 'Пользователь отказался от загрузки обновления.');
+    }
+  });
 });
 
 autoUpdater.on('update-not-available', (info) => {
@@ -62,12 +78,16 @@ autoUpdater.on('update-downloaded', (info) => {
     if (result.response === 0) {
       log('STATUS', 'Пользователь выбрал установку. Перезапуск...');
       autoUpdater.quitAndInstall();
+    } else {
+      log('STATUS', 'Пользователь отложил установку обновления.');
     }
   });
 });
 
 autoUpdater.on('error', (err) => {
-  log('ERROR', `Ошибка автоматического обновления: ${err.stack || err.message || err}`);
+  const errMsg = err.stack || err.message || String(err);
+  log('ERROR', `Ошибка автоматического обновления: ${errMsg}`);
+  dialog.showErrorBox('Ошибка авто-обновления', `Произошла ошибка при обновлении:\n\n${errMsg}`);
 });
 
 function createWindow() {
