@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import AuthScreen from './components/AuthScreen';
 import MainApp from './components/MainApp';
 import SplashScreen from './components/SplashScreen';
-import UpdateChecker from './components/UpdateChecker';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -43,8 +42,6 @@ function App() {
 
   return (
     <>
-      <UpdateChecker />
-
       {showSplash && (
         <SplashScreen onComplete={() => setShowSplash(false)} />
       )}

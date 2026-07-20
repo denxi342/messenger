@@ -3,28 +3,17 @@ const path = require('path');
 const { autoUpdater } = require('electron-updater');
 
 // Configure autoUpdater
-autoUpdater.autoDownload = false; // Do not download automatically, ask first
+autoUpdater.autoDownload = true; // Download automatically in the background
 
 autoUpdater.on('update-available', (info) => {
-  dialog.showMessageBox({
-    type: 'info',
-    title: 'Доступно обновление',
-    message: `Найдена новая версия Octave App (${info.version}). Хотите скачать обновление?`,
-    buttons: ['Скачать обновление', 'Позже'],
-    defaultId: 0,
-    cancelId: 1
-  }).then((result) => {
-    if (result.response === 0) {
-      autoUpdater.downloadUpdate();
-    }
-  });
+  console.log(`Найдено обновление: версия ${info.version}. Загрузка в фоновом режиме...`);
 });
 
-autoUpdater.on('update-downloaded', () => {
+autoUpdater.on('update-downloaded', (info) => {
   dialog.showMessageBox({
     type: 'info',
-    title: 'Обновление загружено',
-    message: 'Новая версия готова к установке. Перезапустить приложение сейчас?',
+    title: 'Обновление готово',
+    message: `Новая версия Octave (${info.version}) успешно загружена. Перезапустить приложение для установки?`,
     buttons: ['Установить и перезапустить', 'Позже'],
     defaultId: 0,
     cancelId: 1
@@ -69,7 +58,7 @@ app.whenReady().then(() => {
   createWindow();
 
   // Trigger check for updates (only in packaged app/production)
-  if (process.env.NODE_ENV !== 'development') {
+  if (app.isPackaged) {
     autoUpdater.checkForUpdatesAndNotify().catch(err => {
       console.error('Не удалось запустить проверку обновлений:', err);
     });
