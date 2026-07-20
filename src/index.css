@@ -21,13 +21,14 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: var(--text-primary); height: 100vh; overflow: hidden; }
-#root { height: 100%; }
+html { height: 100%; overflow: hidden; }
+body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: var(--text-primary); height: 100%; overflow: hidden; margin: 0; }
+#root { height: 100%; overflow: hidden; }
 button { font-family: 'Inter', sans-serif; cursor: pointer; transition: opacity 0.15s, transform 0.15s; }
 input, textarea { font-family: 'Inter', sans-serif; }
 
 /* ========== APP LAYOUT ========== */
-.app-container { display: flex; height: 100vh; position: relative; animation: appEnter 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+.app-container { display: flex; height: 100vh; max-height: 100vh; position: relative; overflow: hidden; animation: appEnter 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
 @keyframes appEnter { from { opacity: 0; transform: scale(0.99); } to { opacity: 1; transform: scale(1); } }
 
 /* ========== AUTH ========== */
@@ -70,9 +71,11 @@ input, textarea { font-family: 'Inter', sans-serif; }
 /* ========== SIDEBAR ========== */
 .sidebar {
   width: var(--sidebar-w);
+  height: 100%;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column; flex-shrink: 0;
+  overflow: hidden;
   animation: slideInLeft 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 @keyframes slideInLeft { from { transform: translateX(-100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
@@ -206,7 +209,7 @@ input, textarea { font-family: 'Inter', sans-serif; }
 .typing-text { margin-left: 2px; }
 
 /* ========== CHAT AREA ========== */
-.chat-area { flex: 1; display: flex; flex-direction: column; background: var(--bg-primary); min-width: 0; }
+.chat-area { flex: 1; display: flex; flex-direction: column; background: var(--bg-primary); min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
 .empty-state { justify-content: center; align-items: center; }
 .empty-state-content { text-align: center; color: var(--text-secondary); }
 .empty-state-icon { margin-bottom: 16px; opacity: 0.25; }
@@ -220,6 +223,7 @@ input, textarea { font-family: 'Inter', sans-serif; }
   background: rgba(26,26,32,0.85);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+  flex-shrink: 0;
 }
 .chat-header-info { display: flex; align-items: center; gap: 12px; }
 .chat-header-text h2 { font-size: 15px; font-weight: 600; line-height: 1.2; }
@@ -242,8 +246,9 @@ input, textarea { font-family: 'Inter', sans-serif; }
 
 /* ─── Messages Container ─── */
 .messages-list {
-  flex: 1; padding: 20px 24px; overflow-y: auto;
+  flex: 1; padding: 20px 24px; overflow-y: auto; overflow-x: hidden;
   display: flex; flex-direction: column; gap: 0;
+  min-height: 0;
 }
 
 /* ─── Message Group ─── */
@@ -365,6 +370,7 @@ input, textarea { font-family: 'Inter', sans-serif; }
   -webkit-backdrop-filter: blur(16px);
   padding: 0;
   position: relative;
+  flex-shrink: 0;
 }
 
 /* Reply preview above the composer */
