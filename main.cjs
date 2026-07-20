@@ -76,6 +76,81 @@ ipcMain.on('restart-and-install', () => {
   autoUpdater.quitAndInstall();
 });
 
+let notificationWindow = null;
+
+function createNotificationWindow() {
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width, height } = primaryDisplay.workAreaSize;
+
+  const winWidth = 360;
+  const winHeight = 500;
+
+  notificationWindow = new BrowserWindow({
+    width: winWidth,
+    height: winHeight,
+    x: width - winWidth - 20,
+    y: height - winHeight - 10,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    resizable: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+
+  const isDev = process.env.NODE_ENV === 'development';
+  if (isDev) {
+    notificationWindow.loadURL('http://localhost:5173/?windowType=notification');
+  } else {
+    // Load local file with search parameters
+    const fileUrl = `file://${path.join(__dirname, 'dist', 'index.html')}?windowType=notification`;
+    notificationWindow.loadURL(fileUrl);
+  }
+
+  // Allow clicks to pass through transparent areas
+  notificationWindow.setIgnoreMouseEvents(true, { forward: true });
+
+  notificationWindow.on('closed', () => {
+    notificationWindow = null;
+  });
+}
+
+// Forward notifications to the desktop notification window
+ipcMain.on('show-desktop-notification', (event, notification) => {
+  if (notificationWindow && !notificationWindow.isDestroyed()) {
+    notificationWindow.webContents.send('desktop-notification-add', notification);
+    notificationWindow.showInactive();
+  }
+});
+
+// Toggle mouse ignoring for the notification window
+ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
+  if (notificationWindow && !notificationWindow.isDestroyed()) {
+    notificationWindow.setIgnoreMouseEvents(ignore, options);
+  }
+});
+
+// Hide the notification window when empty
+ipcMain.on('hide-desktop-notification-window', () => {
+  if (notificationWindow && !notificationWindow.isDestroyed()) {
+    notificationWindow.hide();
+  }
+});
+
+// Forward action click back to the main window
+ipcMain.on('desktop-notification-action', (event, data) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send('desktop-notification-action-triggered', data);
+  }
+});
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -102,6 +177,10 @@ function createWindow() {
   }
 
   mainWindow.on('closed', () => {
+    // Close the notification window as well
+    if (notificationWindow && !notificationWindow.isDestroyed()) {
+      notificationWindow.close();
+    }
     mainWindow = null;
   });
 }
@@ -111,6 +190,7 @@ app.whenReady().then(() => {
   app.setAppUserModelId('com.octave.app');
   
   createWindow();
+  createNotificationWindow();
 
   // Trigger check for updates
   log('STATUS', `Приложение готово. Версия: ${app.getVersion()}. Упаковано: ${app.isPackaged}`);
@@ -118,10 +198,10 @@ app.whenReady().then(() => {
     log('ERROR', `Не удалось запустить проверку обновлений: ${err.stack || err.message}`);
   });
 
-
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
+      createNotificationWindow();
     }
   });
 });

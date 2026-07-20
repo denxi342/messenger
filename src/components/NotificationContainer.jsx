@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import notifyInstance from './NotificationManager';
 import './notifications.css';
 
-const Toast = ({ notification, onDismiss }) => {
+const Toast = ({ notification, onDismiss, isStandalone }) => {
   const { id, type, title, message, duration, messageCount, entering, exiting, senderName, messageText, updateType, connectionStatus } = notification;
   
   const remainingTimeRef = useRef(duration);
@@ -44,11 +44,35 @@ const Toast = ({ notification, onDismiss }) => {
   const handleMouseEnter = () => {
     setHovered(true);
     pauseTimer();
+    
+    // In standalone mode, enable mouse events so user can hover/click elements
+    if (isStandalone) {
+      try {
+        const electron = window.require ? window.require('electron') : null;
+        if (electron) {
+          electron.ipcRenderer.send('set-ignore-mouse-events', false);
+        }
+      } catch (err) {
+        console.error('Failed to send set-ignore-mouse-events:', err);
+      }
+    }
   };
 
   const handleMouseLeave = () => {
     setHovered(false);
     startTimer();
+
+    // In standalone mode, disable mouse events with forward so clicks pass through transparent window
+    if (isStandalone) {
+      try {
+        const electron = window.require ? window.require('electron') : null;
+        if (electron) {
+          electron.ipcRenderer.send('set-ignore-mouse-events', true, { forward: true });
+        }
+      } catch (err) {
+        console.error('Failed to send set-ignore-mouse-events:', err);
+      }
+    }
   };
 
   // Icon mapping
@@ -91,8 +115,23 @@ const Toast = ({ notification, onDismiss }) => {
 
   // Click entire notification to open related content
   const handleToastClick = () => {
-    if (notification.onClick) {
-      notification.onClick();
+    if (isStandalone) {
+      try {
+        const electron = window.require ? window.require('electron') : null;
+        if (electron) {
+          electron.ipcRenderer.send('desktop-notification-action', {
+            action: 'click',
+            contactId: notification.senderId,
+            version: notification.version
+          });
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    } else {
+      if (notification.onClick) {
+        notification.onClick();
+      }
     }
     onDismiss(id);
   };
@@ -100,46 +139,80 @@ const Toast = ({ notification, onDismiss }) => {
   // Handle specific action button clicks
   const handleReplyClick = (e) => {
     e.stopPropagation();
-    if (notification.onReply) {
-      notification.onReply();
+    if (isStandalone) {
+      try {
+        const electron = window.require ? window.require('electron') : null;
+        if (electron) {
+          electron.ipcRenderer.send('desktop-notification-action', {
+            action: 'reply',
+            contactId: notification.senderId
+          });
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    } else {
+      if (notification.onReply) {
+        notification.onReply();
+      }
     }
     onDismiss(id);
   };
 
   const handleMarkAsReadClick = (e) => {
     e.stopPropagation();
-    if (notification.onMarkAsRead) {
-      notification.onMarkAsRead();
+    if (isStandalone) {
+      try {
+        const electron = window.require ? window.require('electron') : null;
+        if (electron) {
+          electron.ipcRenderer.send('desktop-notification-action', {
+            action: 'markAsRead',
+            contactId: notification.senderId
+          });
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    } else {
+      if (notification.onMarkAsRead) {
+        notification.onMarkAsRead();
+      }
     }
     onDismiss(id);
   };
 
   const handleRestartClick = (e) => {
     e.stopPropagation();
-    // Try to trigger quitAndInstall via electron if available
     try {
       const electron = window.require ? window.require('electron') : null;
       if (electron && electron.ipcRenderer) {
         electron.ipcRenderer.send('restart-and-install');
       } else {
-        console.warn('Electron IPC not available. Falling back to updater action.');
-        if (notification.onRestart) {
-          notification.onRestart();
-        }
+        if (notification.onRestart) notification.onRestart();
       }
     } catch (err) {
-      console.error('Error invoking restart:', err);
-      if (notification.onRestart) {
-        notification.onRestart();
-      }
+      console.error(err);
     }
     onDismiss(id);
   };
 
   const handleDownloadClick = (e) => {
     e.stopPropagation();
-    if (notification.onDownload) {
-      notification.onDownload();
+    if (isStandalone) {
+      try {
+        const electron = window.require ? window.require('electron') : null;
+        if (electron) {
+          electron.ipcRenderer.send('desktop-notification-action', {
+            action: 'download'
+          });
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    } else {
+      if (notification.onDownload) {
+        notification.onDownload();
+      }
     }
     onDismiss(id);
   };
@@ -149,7 +222,6 @@ const Toast = ({ notification, onDismiss }) => {
     onDismiss(id);
   };
 
-  // Keyboard navigation on individual toasts
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -167,7 +239,7 @@ const Toast = ({ notification, onDismiss }) => {
       tabIndex={0}
       role="alert"
     >
-      {/* Progress Bar (resets key when count or time resets) */}
+      {/* Progress Bar */}
       <div className="notification-progress-bar">
         <div 
           key={`${messageCount}-${notification.time}`} 
@@ -218,27 +290,113 @@ const Toast = ({ notification, onDismiss }) => {
   );
 };
 
-export default function NotificationContainer() {
+export default function NotificationContainer({ isStandalone = false }) {
   const [notifications, setNotifications] = useState([]);
 
   useEffect(() => {
-    // Subscribe to global NotificationManager state
-    const unsubscribe = notifyInstance.subscribe((newNotifications) => {
-      setNotifications(newNotifications);
-    });
+    if (isStandalone) {
+      // Standalone mode: Receive notifications from Electron main process
+      try {
+        const electron = window.require ? window.require('electron') : null;
+        if (!electron) return;
 
-    return () => unsubscribe();
-  }, []);
+        const handleAdd = (event, notification) => {
+          setNotifications(prev => {
+            // Group messages from the same sender
+            if (notification.type === 'message' && notification.senderId) {
+              const existing = prev.find(
+                (n) => n.type === 'message' && String(n.senderId) === String(notification.senderId) && !n.exiting
+              );
+
+              if (existing) {
+                return prev.map(n => {
+                  if (n.id === existing.id) {
+                    return {
+                      ...n,
+                      messageCount: (n.messageCount || 1) + 1,
+                      messageText: `${(n.messageCount || 1) + 1} новых сообщений`,
+                      time: Date.now(),
+                      isUpdated: true
+                    };
+                  }
+                  return n;
+                });
+              }
+            }
+
+            const newNotification = {
+              id: Math.random().toString(36).slice(2, 9),
+              time: Date.now(),
+              duration: notification.duration || 5000,
+              messageCount: 1,
+              entering: true,
+              ...notification
+            };
+
+            // Max 4 notifications
+            const activeToasts = prev.filter(n => !n.exiting);
+            if (activeToasts.length >= 4) {
+              const oldest = activeToasts[0];
+              return prev.map(n => n.id === oldest.id ? { ...n, exiting: true } : n).concat(newNotification);
+            }
+
+            return [...prev, newNotification];
+          });
+        };
+
+        electron.ipcRenderer.on('desktop-notification-add', handleAdd);
+        return () => {
+          electron.ipcRenderer.removeListener('desktop-notification-add', handleAdd);
+        };
+      } catch (err) {
+        console.error('Failed to set up IPC subscription:', err);
+      }
+    } else {
+      // In-app mode: Subscribe to local NotificationManager
+      const unsubscribe = notifyInstance.subscribe((newNotifications) => {
+        setNotifications(newNotifications);
+      });
+      return () => unsubscribe();
+    }
+  }, [isStandalone]);
+
+  // Hide the standalone window when there are no active notifications remaining
+  useEffect(() => {
+    if (!isStandalone) return;
+
+    try {
+      const electron = window.require ? window.require('electron') : null;
+      if (!electron) return;
+
+      const activeCount = notifications.filter(n => !n.exiting).length;
+      if (activeCount === 0) {
+        electron.ipcRenderer.send('hide-desktop-notification-window');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }, [notifications, isStandalone]);
 
   const handleDismiss = (id) => {
-    notifyInstance.dismiss(id);
+    if (isStandalone) {
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, exiting: true } : n));
+      setTimeout(() => {
+        setNotifications(prev => prev.filter(n => n.id !== id));
+      }, 220);
+    } else {
+      notifyInstance.dismiss(id);
+    }
   };
 
   return (
-    <div className="notifications-container">
-      {/* Reverse rendering order so new messages appear at the top */}
+    <div className={`notifications-container ${isStandalone ? 'standalone' : ''}`}>
       {[...notifications].reverse().map((n) => (
-        <Toast key={n.id} notification={n} onDismiss={handleDismiss} />
+        <Toast 
+          key={n.id} 
+          notification={n} 
+          onDismiss={handleDismiss} 
+          isStandalone={isStandalone} 
+        />
       ))}
     </div>
   );

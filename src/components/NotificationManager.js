@@ -84,15 +84,18 @@ class NotificationManager {
       return;
     }
 
-    // Check window focus status — uses both event-tracked state and live hasFocus()
-    const isFocused = this.isWindowFocused || (typeof document !== 'undefined' && document.hasFocus());
-    if (!isFocused) {
-      // Trigger native desktop notification when app is in background
-      this.triggerNativeNotification(notification);
-      return;
+    // Send via Electron IPC to the standalone desktop notification window
+    try {
+      const electron = window.require ? window.require('electron') : null;
+      if (electron && electron.ipcRenderer) {
+        electron.ipcRenderer.send('show-desktop-notification', notification);
+        return;
+      }
+    } catch (err) {
+      // Fallback if not in Electron context
     }
 
-    // Push to pending queue for sequential animations
+    // Fallback to local in-app rendering
     this.pendingQueue.push(notification);
     this.processQueue();
   }

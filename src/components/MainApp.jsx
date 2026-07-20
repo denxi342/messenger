@@ -358,6 +358,38 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
     }
   };
 
+  useEffect(() => {
+    try {
+      const electron = window.require ? window.require('electron') : null;
+      if (!electron) return;
+
+      const handleAction = (event, data) => {
+        const { action, contactId } = data;
+        if (!contactId) return;
+
+        const currentContact = contactsRef.current.find(c => Number(c.id) === Number(contactId));
+        if (currentContact) {
+          setActiveChat(currentContact);
+          if (action === 'reply') {
+            setTimeout(() => {
+              const textarea = document.querySelector('.composer-input');
+              if (textarea) textarea.focus();
+            }, 150);
+          } else if (action === 'markAsRead') {
+            socketRef.current?.emit('markAsRead', Number(contactId));
+          }
+        }
+      };
+
+      electron.ipcRenderer.on('desktop-notification-action-triggered', handleAction);
+      return () => {
+        electron.ipcRenderer.removeListener('desktop-notification-action-triggered', handleAction);
+      };
+    } catch (err) {
+      console.error('Failed to register desktop-notification-action listener:', err);
+    }
+  }, [contactsRef, socketRef]);
+
   return (
     <div className="app-container">
       {showMyProfile && (

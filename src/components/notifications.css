@@ -12,6 +12,16 @@
   width: 340px;
 }
 
+/* Standalone notification window adjustments */
+.notifications-container.standalone {
+  position: absolute;
+  top: auto;
+  bottom: 10px;
+  right: 10px;
+  left: 10px;
+  width: calc(100% - 20px);
+}
+
 .notification-toast {
   position: relative;
   background: #090909;
