@@ -107,6 +107,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Set AppUserModelId for Windows native notifications to function properly
+  app.setAppUserModelId('com.octave.app');
+  
   createWindow();
 
   // Trigger check for updates

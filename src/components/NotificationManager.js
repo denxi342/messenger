@@ -6,9 +6,16 @@ class NotificationManager {
     this.pendingQueue = [];  // Queue for sequential animations
     this.listeners = new Set();
     this.lastNotificationTime = 0;
-    this.queueDelay = 1000; // 1 second constraint
+    this.queueDelay = 1000; // 1 second between notifications
     this.queueTimer = null;
-    
+
+    // Track focus state robustly via events (more reliable than just hasFocus())
+    this.isWindowFocused = typeof document !== 'undefined' ? document.hasFocus() : true;
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', () => { this.isWindowFocused = true; });
+      window.addEventListener('blur', () => { this.isWindowFocused = false; });
+    }
+
     // Bind public API methods
     this.success = this.success.bind(this);
     this.error = this.error.bind(this);
@@ -74,14 +81,13 @@ class NotificationManager {
   enqueue(notification) {
     // If notification belongs to a muted conversation, suppress it
     if (notification.type === 'message' && notification.senderId && this.isConversationMuted(notification.senderId)) {
-      console.log(`Notification from muted sender ${notification.senderId} suppressed.`);
       return;
     }
 
-    // Check window focus status
-    const isFocused = typeof document !== 'undefined' && document.hasFocus();
+    // Check window focus status — uses both event-tracked state and live hasFocus()
+    const isFocused = this.isWindowFocused || (typeof document !== 'undefined' && document.hasFocus());
     if (!isFocused) {
-      // Trigger native desktop notification
+      // Trigger native desktop notification when app is in background
       this.triggerNativeNotification(notification);
       return;
     }
@@ -93,12 +99,9 @@ class NotificationManager {
 
   // Queue runner enforcing 1s spacing between notifications
   processQueue() {
-    if (this.pendingQueue.length === 0) {
-      return;
-    }
+    if (this.pendingQueue.length === 0) return;
 
-    const now = Date.now();
-    const elapsed = now - this.lastNotificationTime;
+    const elapsed = Date.now() - this.lastNotificationTime;
 
     if (elapsed >= this.queueDelay) {
       const nextNotification = this.pendingQueue.shift();
@@ -106,7 +109,7 @@ class NotificationManager {
       this.lastNotificationTime = Date.now();
     }
 
-    // If there are still items in the queue, schedule the next processing step
+    // If there are still items in the queue, schedule the next run
     if (this.pendingQueue.length > 0 && !this.queueTimer) {
       const waitTime = Math.max(0, this.queueDelay - (Date.now() - this.lastNotificationTime));
       this.queueTimer = setTimeout(() => {
@@ -118,7 +121,7 @@ class NotificationManager {
 
   // Show a notification in the UI container
   showNotification(notification) {
-    // Check if we should group message notifications
+    // Check if we should group message notifications from same sender
     if (notification.type === 'message' && notification.senderId) {
       const existing = this.notifications.find(
         (n) => n.type === 'message' && String(n.senderId) === String(notification.senderId) && !n.exiting
@@ -127,11 +130,9 @@ class NotificationManager {
       if (existing) {
         // Group messages from same sender
         existing.messageCount = (existing.messageCount || 1) + 1;
-        existing.messageText = `${existing.messageCount} new messages`;
-        existing.time = Date.now(); // Reset timer timestamp
-        existing.isUpdated = true; // Let container know it updated
-        
-        // Notify listeners so UI updates
+        existing.messageText = `${existing.messageCount} новых сообщений`;
+        existing.time = Date.now();
+        existing.isUpdated = true;
         this.notifyListeners();
         return;
       }
@@ -146,12 +147,10 @@ class NotificationManager {
       ...notification
     };
 
-    // Stacking limit: 4 notifications. If limit exceeded, remove oldest
+    // Stacking limit: max 4 notifications. Dismiss oldest if exceeded
     const activeToasts = this.notifications.filter(n => !n.exiting);
     if (activeToasts.length >= 4) {
-      // Dismiss the oldest active notification
-      const oldestActive = activeToasts[0];
-      this.dismiss(oldestActive.id);
+      this.dismiss(activeToasts[0].id);
     }
 
     this.notifications.push(newNotification);
@@ -169,30 +168,34 @@ class NotificationManager {
 
   // Trigger HTML5 notification when application is unfocused or minimized
   triggerNativeNotification(notification) {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      let title = notification.title || 'Octave';
-      let body = notification.message || notification.messageText || '';
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
 
-      if (notification.type === 'message') {
-        title = notification.senderName || 'New Message';
-        body = notification.messageText || '';
-      }
+    let title = notification.title || 'Octave';
+    let body = notification.message || notification.messageText || '';
 
-      try {
-        const nativeToast = new window.Notification(title, {
-          body,
-          silent: false
-        });
+    if (notification.type === 'message') {
+      title = notification.senderName || 'New Message';
+      body = notification.messageText || '';
+    }
 
-        nativeToast.onclick = () => {
-          if (notification.onClick) {
-            notification.onClick();
-          }
+    try {
+      const showIt = () => {
+        const n = new window.Notification(title, { body, silent: false });
+        n.onclick = () => {
+          if (notification.onClick) notification.onClick();
           window.focus();
         };
-      } catch (err) {
-        console.error('Failed to show native notification:', err);
+      };
+
+      if (window.Notification.permission === 'granted') {
+        showIt();
+      } else if (window.Notification.permission !== 'denied') {
+        window.Notification.requestPermission().then(permission => {
+          if (permission === 'granted') showIt();
+        });
       }
+    } catch (err) {
+      console.error('Failed to show native notification:', err);
     }
   }
 
@@ -215,12 +218,11 @@ class NotificationManager {
   dismissNewest() {
     const active = this.notifications.filter((n) => !n.exiting);
     if (active.length > 0) {
-      const newest = active[active.length - 1];
-      this.dismiss(newest.id);
+      this.dismiss(active[active.length - 1].id);
     }
   }
 
-  // Public API integration methods
+  // ─── Public API ──────────────────────────────────────────────────────────
 
   success(title, message, options = {}) {
     this.enqueue({ type: 'success', title, message, ...options });
@@ -240,48 +242,33 @@ class NotificationManager {
 
   // senderId used for grouping and mute checks
   message(senderName, messageText, senderId, options = {}) {
-    this.enqueue({
-      type: 'message',
-      senderName,
-      messageText,
-      senderId,
-      ...options
-    });
+    this.enqueue({ type: 'message', senderName, messageText, senderId, ...options });
   }
 
-  // type options: 'available' | 'downloaded'
+  // updateType: 'available' | 'downloaded'
   update(updateType, version, options = {}) {
-    let title = 'Update Available';
-    let message = `Version ${version} is ready.`;
-    if (updateType === 'downloaded') {
-      title = 'Update Ready';
-      message = `Version ${version} is downloaded. Restart to install.`;
-    }
-    
+    const isDownloaded = updateType === 'downloaded';
     this.enqueue({
       type: 'update',
       updateType,
       version,
-      title,
-      message,
-      duration: 10000, // Longer auto-dismiss for updates
+      title: isDownloaded ? 'Update Ready' : 'Update Available',
+      message: isDownloaded
+        ? `Version ${version} is downloaded. Restart to install.`
+        : `Version ${version} is ready.`,
+      duration: 10000,
       ...options
     });
   }
 
-  // status options: 'lost' | 'restored'
+  // status: 'lost' | 'restored'
   connection(status, options = {}) {
-    const title = status === 'lost' ? 'Connection Lost' : 'Connected';
-    const message = status === 'lost' ? 'Trying to reconnect...' : 'Secure connection restored.';
-    const typeClass = status === 'lost' ? 'warning' : 'success';
-    
     this.enqueue({
       type: 'connection',
       connectionStatus: status,
-      title,
-      message,
-      // Auto-dismiss connections unless specified
-      duration: status === 'lost' ? 60000 : 4000, 
+      title: status === 'lost' ? 'Connection Lost' : 'Connected',
+      message: status === 'lost' ? 'Trying to reconnect...' : 'Secure connection restored.',
+      duration: status === 'lost' ? 60000 : 4000,
       ...options
     });
   }

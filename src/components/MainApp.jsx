@@ -138,22 +138,27 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
     fetchSettings(user.token).then(setSettings).catch(console.error);
 
     const SOCKET_URL = import.meta.env.VITE_SOCKET_URL === undefined ? 'http://localhost:3001' : import.meta.env.VITE_SOCKET_URL;
+    console.log('[MainApp] Connecting socket to:', SOCKET_URL, 'userId:', user.userId);
     socketRef.current = io(SOCKET_URL, { auth: { token: user.token } });
+    window.__socket = socketRef.current; // expose for CDP debugging
 
     let wasDisconnected = false;
     socketRef.current.on('connect', () => {
+      console.log('[MainApp] Socket CONNECTED! Socket id:', socketRef.current.id);
       if (wasDisconnected) {
         window.notify?.connection('restored');
         wasDisconnected = false;
       }
     });
 
-    socketRef.current.on('disconnect', () => {
+    socketRef.current.on('disconnect', (reason) => {
+      console.log('[MainApp] Socket DISCONNECTED. Reason:', reason);
       wasDisconnected = true;
       window.notify?.connection('lost');
     });
 
     socketRef.current.on('connect_error', (err) => {
+      console.error('[MainApp] Socket CONNECT ERROR:', err.message);
       if (err.message === 'Authentication error') onLogout();
     });
 
@@ -193,6 +198,7 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
 
       const isIncoming = senderId !== myId;
       const chatIsOpen = activeChatRef.current && Number(activeChatRef.current.id) === contactId;
+
       if (isIncoming && !chatIsOpen) {
         setUnreadCounts(prev => ({ ...prev, [contactId]: (prev[contactId] || 0) + 1 }));
 
@@ -200,11 +206,8 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
         const contact = contactsRef.current.find(c => Number(c.id) === contactId);
         const displayName = contact ? (contact.display_name || contact.username) : msg.senderName || 'Anonymous';
         let bodyText = msg.text;
-        if (msg.media_type === 'image') {
-          bodyText = '📷 Фото';
-        } else if (msg.media_type === 'video') {
-          bodyText = '🎥 Видео';
-        }
+        if (msg.media_type === 'image') bodyText = '📷 Фото';
+        else if (msg.media_type === 'video') bodyText = '🎥 Видео';
 
         window.notify?.message(displayName, bodyText, contactId, {
           onClick: () => {
