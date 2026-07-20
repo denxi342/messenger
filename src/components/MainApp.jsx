@@ -365,6 +365,14 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
 
       const handleAction = (event, data) => {
         const { action, contactId } = data;
+        if (action === 'download') {
+          electron.ipcRenderer.send('download-update');
+          return;
+        }
+        if (action === 'restart') {
+          electron.ipcRenderer.send('restart-and-install');
+          return;
+        }
         if (!contactId) return;
 
         const currentContact = contactsRef.current.find(c => Number(c.id) === Number(contactId));

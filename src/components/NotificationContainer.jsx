@@ -262,28 +262,28 @@ const Toast = ({ notification, onDismiss, isStandalone }) => {
         {type === 'message' && (
           <>
             <button className="notification-btn btn-primary" onClick={handleReplyClick}>
-              Reply
+              Ответить
             </button>
             <button className="notification-btn" onClick={handleMarkAsReadClick}>
-              Mark as read
+              Прочитать
             </button>
           </>
         )}
 
         {type === 'update' && updateType === 'available' && (
           <button className="notification-btn btn-primary" onClick={handleDownloadClick}>
-            Download
+            Скачать обновление
           </button>
         )}
 
         {type === 'update' && updateType === 'downloaded' && (
           <button className="notification-btn btn-primary" onClick={handleRestartClick}>
-            Restart
+            Перезапустить
           </button>
         )}
 
         <button className="notification-btn btn-danger" onClick={handleDismissClick}>
-          Dismiss
+          Закрыть
         </button>
       </div>
     </div>

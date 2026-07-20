@@ -255,10 +255,10 @@ class NotificationManager {
       type: 'update',
       updateType,
       version,
-      title: isDownloaded ? 'Update Ready' : 'Update Available',
+      title: isDownloaded ? 'Обновление готово к установке' : 'Доступно обновление',
       message: isDownloaded
-        ? `Version ${version} is downloaded. Restart to install.`
-        : `Version ${version} is ready.`,
+        ? `Версия ${version} успешно загружена. Перезапустите приложение для установки.`
+        : `Доступна новая версия ${version}. Нажмите «Скачать обновление» для загрузки.`,
       duration: 10000,
       ...options
     });
@@ -269,8 +269,8 @@ class NotificationManager {
     this.enqueue({
       type: 'connection',
       connectionStatus: status,
-      title: status === 'lost' ? 'Connection Lost' : 'Connected',
-      message: status === 'lost' ? 'Trying to reconnect...' : 'Secure connection restored.',
+      title: status === 'lost' ? 'Соединение разорвано' : 'Подключено',
+      message: status === 'lost' ? 'Попытка восстановить подключение...' : 'Безопасное соединение успешно восстановлено.',
       duration: status === 'lost' ? 60000 : 4000,
       ...options
     });
