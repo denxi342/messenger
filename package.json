@@ -30,7 +30,8 @@
       "package.json"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "artifactName": "${productName}-Setup-${version}.exe"
     }
   },
   "dependencies": {
