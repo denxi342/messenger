@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Avatar from './Avatar';
 import MessageComponent from './Message';
+import MediaUploader from '../media/MediaUploader';
+import UploadPreviewBar from '../media/UploadPreviewBar';
+import { validateFile } from '../media/FileValidator';
+import { generateImageThumbnail, generateVideoThumbnail } from '../media/ThumbnailGenerator';
+import { UploadManager } from '../media/UploadManager';
 
 const EMOJI_PICKER = [
   '😀', '😂', '😍', '🥲', '😭', '🤔', '🔥', '❤️',
@@ -206,6 +211,107 @@ export default function ChatArea({
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const activeChatIdRef = useRef(activeChat?.id);
+  const fileInputRef = useRef(null);
+
+  // Auto scroll to bottom when new messages load or arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [localMessages]);
+
+  const handleFilesSelected = async (files) => {
+    for (const file of files) {
+      const validation = await validateFile(file);
+      if (!validation.valid) {
+        alert(validation.error);
+        continue;
+      }
+
+      let metadata = {};
+      try {
+        if (validation.mediaType === 'image') {
+          const thumbResult = await generateImageThumbnail(file);
+          metadata = {
+            thumbnail: thumbResult.thumbnail,
+            width: thumbResult.width,
+            height: thumbResult.height
+          };
+        } else if (validation.mediaType === 'video') {
+          const thumbResult = await generateVideoThumbnail(file);
+          metadata = {
+            thumbnail: thumbResult.thumbnail,
+            width: thumbResult.width,
+            height: thumbResult.height,
+            duration: thumbResult.duration
+          };
+        }
+      } catch (err) {
+        console.error('Metadata/Thumbnail generation failed:', err);
+      }
+
+      UploadManager.add(file, currentUser.token, metadata);
+    }
+  };
+
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleFilesSelected(Array.from(e.target.files));
+      // Reset input value to allow selecting same file again
+      e.target.value = '';
+    }
+  };
+
+  // Clipboard paste media handler
+  useEffect(() => {
+    if (!activeChat) return;
+
+    const handlePaste = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const files = [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].kind === 'file') {
+          const file = items[i].getAsFile();
+          if (file) files.push(file);
+        }
+      }
+
+      if (files.length > 0) {
+        e.preventDefault();
+        handleFilesSelected(files);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [activeChat, currentUser]);
+
+  // Subscribe to UploadManager events to emit message when upload finishes
+  useEffect(() => {
+    if (!activeChat) return;
+    
+    const unsubscribe = UploadManager.subscribe((items) => {
+      items.forEach((item) => {
+        if (item.status === 'done' && item.result) {
+          // Send media via socket emitter in MainApp
+          onSendMessage('', null, false, {
+            mediaUrl: item.result.url,
+            mediaType: item.result.type,
+            mediaWidth: item.result.width,
+            mediaHeight: item.result.height,
+            mediaDuration: item.result.duration,
+            mediaSize: item.result.size,
+            mediaName: item.result.name,
+            mediaThumbnail: item.result.thumbnail
+          });
+          // Remove from queue
+          UploadManager.cancel(item.id);
+        }
+      });
+    });
+
+    return () => unsubscribe();
+  }, [onSendMessage, activeChat?.id]);
 
   const contactName = activeChat
     ? (activeChat.display_name || activeChat.username)
@@ -444,7 +550,8 @@ export default function ChatArea({
   }
 
   return (
-    <main className="chat-area">
+    <MediaUploader onFilesSelected={handleFilesSelected}>
+      <main className="chat-area">
       {contextMenu && (
         <ContextMenu
           x={contextMenu.x}
@@ -574,10 +681,26 @@ export default function ChatArea({
           />
         )}
 
+        <UploadPreviewBar />
+
         <div className="composer-row">
-          <button type="button" className="composer-btn" title="Прикрепить файл">
+          <button 
+            type="button" 
+            className="composer-btn" 
+            title="Прикрепить файл"
+            onClick={() => fileInputRef.current?.click()}
+          >
             📎
           </button>
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            style={{ display: 'none' }}
+            multiple
+            accept="image/*,video/*"
+            onChange={handleFileChange}
+          />
 
           <div className="composer-input-wrap">
             <textarea
@@ -630,5 +753,6 @@ export default function ChatArea({
         )}
       </footer>
     </main>
+    </MediaUploader>
   );
 }

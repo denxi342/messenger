@@ -1912,3 +1912,58 @@ body, .msg-bubble, .contact-name, .contact-last-msg, .composer-input {
   display: inline-block;
 }
 
+/* Media Messages Bubble Override */
+.msg-bubble--has-media {
+  max-width: 320px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Translucent overlay meta for media-only messages */
+.msg-bubble--media-only .msg-bubble__meta {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 3px 8px;
+  border-radius: 10px;
+  margin: 0 !important;
+  z-index: 10;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.msg-bubble--media-only .msg-bubble__time {
+  color: rgba(255, 255, 255, 0.9) !important;
+  font-size: 10px;
+}
+
+/* Caption text wrapper styling */
+.msg-media-caption-text {
+  padding: 10px 14px 12px 14px;
+  width: 100%;
+}
+
+.msg-media-caption-text .msg-bubble__text {
+  color: #ffffff;
+  font-size: 14px;
+  line-height: 1.45;
+  display: block;
+}
+
+.msg-media-caption-text .msg-bubble__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  float: right;
+  margin-left: 12px;
+  margin-top: 4px;
+  line-height: 1;
+}
+

@@ -7,6 +7,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import multer from 'multer';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,6 +18,45 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 const app = express();
 
 app.use(express.json());
+
+// Setup secure media uploads directory
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Serve uploaded files statically and securely
+app.use('/uploads', express.static(uploadsDir));
+
+// Multer storage & security configuration
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, file.fieldname + '-' + uniqueSuffix + ext);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 200 * 1024 * 1024 // Max 200MB file limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm', 'video/quicktime'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowedExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.webm', '.mov'];
+    
+    if (allowedMimes.includes(file.mimetype) && allowedExts.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Недопустимый формат файла. Разрешены только изображения и видео.'));
+    }
+  }
+});
 
 const corsOptions = {
   origin: (origin, callback) => {
@@ -124,13 +165,13 @@ async function createSession(userId, token, req) {
 }
 
 async function initDB() {
-  const url = process.env.TURSO_DATABASE_URL;
-  const authToken = process.env.TURSO_AUTH_TOKEN;
+  let url = process.env.TURSO_DATABASE_URL;
+  let authToken = process.env.TURSO_AUTH_TOKEN;
 
   if (!url || !authToken) {
-    console.error("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN variables are missing.");
-    console.error("Please set them to connect to your Turso database.");
-    process.exit(1);
+    console.warn("[DB] TURSO_DATABASE_URL/TURSO_AUTH_TOKEN missing, falling back to local file:database.sqlite");
+    url = "file:database.sqlite";
+    authToken = undefined;
   }
 
   const dbClient = createClient({ url, authToken });
@@ -209,6 +250,14 @@ async function initDB() {
       is_read BOOLEAN DEFAULT 0,
       is_e2ee BOOLEAN DEFAULT 0,
       reply_to_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+      media_url TEXT,
+      media_type TEXT,
+      media_width INTEGER,
+      media_height INTEGER,
+      media_duration REAL,
+      media_size INTEGER,
+      media_name TEXT,
+      media_thumbnail TEXT,
       FOREIGN KEY(sender_id) REFERENCES users(id),
       FOREIGN KEY(recipient_id) REFERENCES users(id)
     );
@@ -267,7 +316,15 @@ async function initDB() {
     ['is_forwarded', 'ALTER TABLE messages ADD COLUMN is_forwarded BOOLEAN DEFAULT 0'],
     ['is_delivered', 'ALTER TABLE messages ADD COLUMN is_delivered BOOLEAN DEFAULT 0'],
     ['reply_to_id', 'ALTER TABLE messages ADD COLUMN reply_to_id INTEGER'],
-    ['created_at', 'ALTER TABLE messages ADD COLUMN created_at DATETIME']
+    ['created_at', 'ALTER TABLE messages ADD COLUMN created_at DATETIME'],
+    ['media_url', 'ALTER TABLE messages ADD COLUMN media_url TEXT'],
+    ['media_type', 'ALTER TABLE messages ADD COLUMN media_type TEXT'],
+    ['media_width', 'ALTER TABLE messages ADD COLUMN media_width INTEGER'],
+    ['media_height', 'ALTER TABLE messages ADD COLUMN media_height INTEGER'],
+    ['media_duration', 'ALTER TABLE messages ADD COLUMN media_duration REAL'],
+    ['media_size', 'ALTER TABLE messages ADD COLUMN media_size INTEGER'],
+    ['media_name', 'ALTER TABLE messages ADD COLUMN media_name TEXT'],
+    ['media_thumbnail', 'ALTER TABLE messages ADD COLUMN media_thumbnail TEXT']
   ];
 
   for (const [column, sql] of additiveColumns) {
@@ -411,6 +468,34 @@ app.post(['/profile/avatar', '/api/profile/avatar'], auth, async (req, res) => {
   await db.run('UPDATE users SET avatar_base64 = ? WHERE id = ?', [avatar, req.user.userId]);
   await broadcastProfileUpdate(req.user.userId);
   res.json({ success: true });
+});
+
+// File upload endpoint
+app.post(['/upload', '/api/upload'], auth, (req, res) => {
+  upload.single('file')(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'Файл не предоставлен' });
+    }
+
+    const mime = req.file.mimetype;
+    let type = 'image';
+    if (mime.startsWith('video/')) {
+      type = 'video';
+    }
+
+    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+
+    res.json({
+      url: fileUrl,
+      type: type,
+      name: req.file.originalname,
+      size: req.file.size,
+      mime: mime
+    });
+  });
 });
 
 app.post(['/change-password', '/api/change-password'], auth, async (req, res) => {
@@ -571,14 +656,22 @@ app.get(['/my-contacts', '/api/my-contacts'], auth, async (req, res) => {
     // Attach last message and unread count for each contact
     for (const contact of contacts) {
       const lastMsg = await db.get(`
-        SELECT text, time, sender_id, is_deleted_for_all FROM messages
+        SELECT text, time, sender_id, is_deleted_for_all, media_type FROM messages
         WHERE ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))
           AND id NOT IN (SELECT message_id FROM deleted_messages WHERE user_id = ?)
         ORDER BY id DESC LIMIT 1
       `, [req.user.userId, contact.id, contact.id, req.user.userId, req.user.userId]);
       
       if (lastMsg) {
-        contact.last_message_text = lastMsg.is_deleted_for_all ? 'Сообщение удалено' : lastMsg.text;
+        if (lastMsg.is_deleted_for_all) {
+          contact.last_message_text = 'Сообщение удалено';
+        } else if (lastMsg.media_type === 'image') {
+          contact.last_message_text = '📷 Фото';
+        } else if (lastMsg.media_type === 'video') {
+          contact.last_message_text = '🎥 Видео';
+        } else {
+          contact.last_message_text = lastMsg.text;
+        }
         contact.last_message_time = lastMsg.time;
         contact.last_message_sender_id = lastMsg.sender_id;
       }
@@ -699,8 +792,16 @@ io.on('connection', (socket) => {
   // Send message with optional reply and forward
   socket.on('sendPrivateMessage', async (msgData) => {
     const recipientId = Number(msgData.recipientId);
-    const { text, time, isE2ee = false, replyToId = null, isForwarded = false } = msgData;
-    if (!recipientId || typeof text !== 'string' || !text.trim()) return;
+    const { 
+      text, time, isE2ee = false, replyToId = null, isForwarded = false,
+      mediaUrl = null, mediaType = null, mediaWidth = null, mediaHeight = null,
+      mediaDuration = null, mediaSize = null, mediaName = null, mediaThumbnail = null
+    } = msgData;
+
+    const hasMedia = !!mediaUrl;
+    const bodyText = typeof text === 'string' ? text.trim() : '';
+
+    if (!recipientId || (!bodyText && !hasMedia)) return;
 
     try {
       const normalizedReplyToId = replyToId == null ? null : Number(replyToId);
@@ -729,13 +830,16 @@ io.on('connection', (socket) => {
         }
       }
 
-      // Explicitly use the database clock. This also works for legacy Turso
-      // databases where created_at was added without a DEFAULT expression.
+      // Insert message with media columns
       const result = await db.run(
         `INSERT INTO messages
-          (sender_id, recipient_id, text, time, is_e2ee, reply_to_id, is_forwarded, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-        [userId, recipientId, text.trim(), time, isE2ee ? 1 : 0, normalizedReplyToId, isForwarded ? 1 : 0]
+          (sender_id, recipient_id, text, time, is_e2ee, reply_to_id, is_forwarded,
+           media_url, media_type, media_width, media_height, media_duration, media_size, media_name, media_thumbnail, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [
+          userId, recipientId, bodyText, time, isE2ee ? 1 : 0, normalizedReplyToId, isForwarded ? 1 : 0,
+          mediaUrl, mediaType, mediaWidth, mediaHeight, mediaDuration, mediaSize, mediaName, mediaThumbnail
+        ]
       );
       const persisted = await db.get(
         'SELECT id, created_at FROM messages WHERE id = ?',
@@ -749,7 +853,7 @@ io.on('connection', (socket) => {
         id: result.lastID,
         sender_id: userId,
         recipient_id: recipientId,
-        text: text.trim(), time,
+        text: bodyText, time,
         created_at: persisted.created_at,
         is_e2ee: isE2ee,
         reply_to_id: normalizedReplyToId,
@@ -759,7 +863,15 @@ io.on('connection', (socket) => {
         is_delivered: 0,
         is_read: 0,
         senderName: socket.user.username,
-        reactions: []
+        reactions: [],
+        media_url: mediaUrl,
+        media_type: mediaType,
+        media_width: mediaWidth,
+        media_height: mediaHeight,
+        media_duration: mediaDuration,
+        media_size: mediaSize,
+        media_name: mediaName,
+        media_thumbnail: mediaThumbnail
       };
 
       if (replyParent) {

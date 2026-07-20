@@ -1,4 +1,5 @@
 import React from 'react';
+import MediaMessage from '../media/MediaMessage';
 
 const EMOJI_QUICK = ['👍', '❤️', '😂', '😮', '😢', '🔥', '🎉', '👀'];
 
@@ -161,17 +162,43 @@ export default function Message({
             posClass,
             `msg-bubble--${settings?.bubbleStyle || 'rounded'}`,
             isDeletedForAll ? 'msg-deleted' : '',
+            (!isDeletedForAll && msg.media_url) ? 'msg-bubble--has-media' : '',
+            (!isDeletedForAll && msg.media_url && !msg.text) ? 'msg-bubble--media-only' : '',
+            (!isDeletedForAll && msg.media_url && msg.text) ? 'msg-bubble--media-caption' : '',
           ].join(' ')}
           onContextMenu={(event) => handleContextMenu(event, msg)}
         >
-          <span className="msg-bubble__text">
-            {isDeletedForAll ? <i>Сообщение удалено</i> : msg.text || ''}
-          </span>
+          {!isDeletedForAll && msg.media_url ? (
+            <>
+              <MediaMessage msg={msg} />
+              
+              {!msg.text ? (
+                <span className="msg-bubble__meta">
+                  {isEdited && <span className="msg-bubble__edited">(изменено)</span>}
+                  <span className="msg-bubble__time">{msg.time || msg.created_at?.slice(11, 16)}</span>
+                </span>
+              ) : (
+                <div className="msg-media-caption-text">
+                  <span className="msg-bubble__text">{msg.text}</span>
+                  <span className="msg-bubble__meta">
+                    {isEdited && <span className="msg-bubble__edited">(изменено)</span>}
+                    <span className="msg-bubble__time">{msg.time || msg.created_at?.slice(11, 16)}</span>
+                  </span>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="msg-bubble__text">
+                {isDeletedForAll ? <i>Сообщение удалено</i> : msg.text || ''}
+              </span>
 
-          <span className="msg-bubble__meta">
-            {isEdited && !isDeletedForAll && <span className="msg-bubble__edited">(изменено)</span>}
-            <span className="msg-bubble__time">{msg.time || msg.created_at?.slice(11, 16)}</span>
-          </span>
+              <span className="msg-bubble__meta">
+                {isEdited && !isDeletedForAll && <span className="msg-bubble__edited">(изменено)</span>}
+                <span className="msg-bubble__time">{msg.time || msg.created_at?.slice(11, 16)}</span>
+              </span>
+            </>
+          )}
         </div>
 
         {!isDeletedForAll && (

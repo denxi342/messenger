@@ -128,7 +128,14 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
       // Update last message on contact
       setContacts(prev => prev.map(c =>
         Number(c.id) === contactId
-          ? { ...c, last_message_text: msg.is_deleted_for_all ? 'Сообщение удалено' : msg.text, last_message_time: msg.time, last_message_sender_id: senderId }
+          ? { 
+              ...c, 
+              last_message_text: msg.is_deleted_for_all 
+                ? 'Сообщение удалено' 
+                : (msg.media_type === 'image' ? '📷 Фото' : (msg.media_type === 'video' ? '🎥 Видео' : msg.text)), 
+              last_message_time: msg.time, 
+              last_message_sender_id: senderId 
+            }
           : c
       ));
 
@@ -240,8 +247,8 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
     }
   }, [activeChat]);
 
-  const handleSendMessage = (text, replyToId = null, isForwarded = false) => {
-    if (!activeChat || !text.trim()) return;
+  const handleSendMessage = (text, replyToId = null, isForwarded = false, mediaData = null) => {
+    if (!activeChat || (!text.trim() && !mediaData)) return;
     socketRef.current.emit('sendPrivateMessage', {
       recipientId: Number(activeChat.id),
       text,
@@ -249,6 +256,7 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
       isE2ee: true,
       replyToId,
       isForwarded,
+      ...mediaData
     });
   };
 

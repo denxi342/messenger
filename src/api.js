@@ -166,3 +166,56 @@ export const unblockUser = async (token, userId) => {
   if (!res.ok) throw new Error('Failed to unblock user');
   return res.json();
 };
+
+export const uploadMedia = (token, file, onProgress, signal) => {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const formData = new FormData();
+    formData.append('file', file);
+
+    xhr.open('POST', `${BASE_URL}/upload`);
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        xhr.abort();
+        reject(new DOMException('Aborted', 'AbortError'));
+      });
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const percent = (event.loaded / event.total) * 100;
+        if (onProgress) onProgress(percent);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const response = JSON.parse(xhr.responseText);
+          resolve(response);
+        } catch (e) {
+          reject(new Error('Invalid response JSON'));
+        }
+      } else {
+        try {
+          const response = JSON.parse(xhr.responseText);
+          reject(new Error(response.error || `Upload failed with status ${xhr.status}`));
+        } catch (e) {
+          reject(new Error(`Upload failed with status ${xhr.status}`));
+        }
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error('Ошибка сети при загрузке'));
+    };
+
+    xhr.ontimeout = () => {
+      reject(new Error('Время ожидания загрузки истекло'));
+    };
+
+    xhr.send(formData);
+  });
+};
