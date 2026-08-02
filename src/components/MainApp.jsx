@@ -166,6 +166,7 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
 
     socketRef.current.on('privateHistory', ({ contactId, messages, pinnedMessageIds }) => {
       const cid = Number(contactId);
+      console.log(`[MainApp] privateHistory: cid=${cid} count=${messages.length}`);
       setMessagesData(prev => ({ ...prev, [cid]: messages }));
       setHistoryLoaded(prev => ({ ...prev, [cid]: true }));
       if (pinnedMessageIds) setPinnedMessages(prev => ({ ...prev, [cid]: pinnedMessageIds }));
@@ -239,9 +240,9 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
       }
     });
 
-    // Real-time message state updates
     socketRef.current.on('messageDeletedSelf', (payload) => {
       const targetId = Number((payload && typeof payload === 'object') ? payload.messageId : payload);
+      console.log('[MainApp] messageDeletedSelf received, targetId=', targetId);
       setMessagesData(prev => {
         const updated = {};
         Object.entries(prev).forEach(([cid, msgs]) => {
@@ -253,11 +254,17 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
 
     socketRef.current.on('messageDeletedAll', (payload) => {
       const targetId = Number((payload && typeof payload === 'object') ? payload.messageId : payload);
+      console.log('[MainApp] messageDeletedAll received, targetId=', targetId, 'payload=', payload);
       setMessagesData(prev => {
+        const keys = Object.keys(prev);
+        console.log('[MainApp] messagesData keys:', keys, 'looking for msg id', targetId);
         const updated = {};
         Object.entries(prev).forEach(([cid, msgs]) => {
           updated[cid] = msgs.map(m => {
-            if (Number(m.id) === targetId) return { ...m, is_deleted_for_all: 1, text: '', media_url: null, media_thumbnail: null, reactions: [] };
+            if (Number(m.id) === targetId) {
+              console.log('[MainApp] FOUND and marking deleted msg id=', m.id, 'in chat cid=', cid);
+              return { ...m, is_deleted_for_all: 1, text: '', media_url: null, media_thumbnail: null, reactions: [] };
+            }
             if (Number(m.reply_to_id) === targetId) {
               return { ...m, reply_text: '', reply_is_deleted_for_all: 1 };
             }
