@@ -49,6 +49,9 @@ function ContextMenu({
   onClose,
   onReply,
   onCopy,
+  onEdit,
+  onDeleteSelf,
+  onDeleteAll,
   onReact,
 }) {
   const menuRef = useRef(null);
@@ -75,9 +78,11 @@ function ContextMenu({
 
   const isDeleted = Number(msg.is_deleted_for_all) === 1;
   const isOwn = Number(msg.sender_id) === Number(currentUserId);
+  const hasText = Boolean(msg.text && msg.text.trim());
+  const canEdit = isOwn && !isDeleted && hasText && !msg.media_url;
 
   const style = {
-    top: Math.max(12, Math.min(y, window.innerHeight - 300)),
+    top: Math.max(12, Math.min(y, window.innerHeight - 320)),
     left: Math.max(12, Math.min(x, window.innerWidth - 220)),
   };
 
@@ -88,11 +93,6 @@ function ContextMenu({
           type="button"
           className="ctx-item"
           onClick={() => {
-            console.log('[ContextMenu] reply selected', {
-              messageId: msg.id,
-              text: msg.text,
-            });
-
             onReply(msg);
             onClose();
           }}
@@ -102,17 +102,31 @@ function ContextMenu({
         </button>
       )}
 
-      {!isDeleted && (
+      {!isDeleted && hasText && (
         <button
           type="button"
           className="ctx-item"
           onClick={() => {
-            navigator.clipboard?.writeText(msg.text || '');
+            onCopy(msg.text || '');
             onClose();
           }}
         >
           <span className="ctx-icon">📋</span>
           <span>Копировать</span>
+        </button>
+      )}
+
+      {canEdit && (
+        <button
+          type="button"
+          className="ctx-item"
+          onClick={() => {
+            onEdit(msg);
+            onClose();
+          }}
+        >
+          <span className="ctx-icon">✏️</span>
+          <span>Редактировать</span>
         </button>
       )}
 
@@ -130,8 +144,30 @@ function ContextMenu({
         </button>
       )}
 
+      <button
+        type="button"
+        className="ctx-item ctx-item--danger"
+        onClick={() => {
+          onDeleteSelf(msg);
+          onClose();
+        }}
+      >
+        <span className="ctx-icon">🗑️</span>
+        <span>Удалить у меня</span>
+      </button>
+
       {isOwn && !isDeleted && (
-        <span className="ctx-menu-own-message">Ваше сообщение</span>
+        <button
+          type="button"
+          className="ctx-item ctx-item--danger"
+          onClick={() => {
+            onDeleteAll(msg);
+            onClose();
+          }}
+        >
+          <span className="ctx-icon">💥</span>
+          <span>Удалить у всех</span>
+        </button>
       )}
     </div>
   );
@@ -150,10 +186,7 @@ function ReplyComposerPreview({ replyTo, currentUser, contactName, onCancel }) {
       role="button"
       tabIndex={0}
       title="Нажмите, чтобы отменить ответ"
-      onClick={() => {
-        console.log('[ReplyComposer] reply cancelled by preview click');
-        onCancel();
-      }}
+      onClick={() => onCancel()}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
@@ -176,12 +209,54 @@ function ReplyComposerPreview({ replyTo, currentUser, contactName, onCancel }) {
         aria-label="Отменить ответ"
         onClick={(event) => {
           event.stopPropagation();
-          console.log('[ReplyComposer] reply cancelled by close button');
           onCancel();
         }}
       >
         ×
       </button>
+    </div>
+  );
+}
+
+function EditComposerPreview({ editingMessage, onCancel }) {
+  return (
+    <div className="composer-edit-bar">
+      <div className="composer-edit-bar-left">
+        <span className="composer-edit-icon">✏️</span>
+        <div className="composer-edit-content">
+          <span className="composer-edit-label">Редактирование сообщения</span>
+          <span className="composer-edit-text">{truncate(editingMessage.text || '', 80)}</span>
+        </div>
+      </div>
+      <button
+        type="button"
+        className="composer-edit-close"
+        title="Отменить редактирование (Esc)"
+        onClick={onCancel}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+function DeleteConfirmModal({ onConfirm, onCancel }) {
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="confirm-card-dialog" onClick={(e) => e.stopPropagation()}>
+        <p className="confirm-dialog-title">Удалить у всех?</p>
+        <p className="confirm-dialog-desc">
+          Сообщение будет удалено для всех участников чата. Это действие нельзя отменить.
+        </p>
+        <div className="confirm-dialog-buttons">
+          <button className="dialog-btn-cancel" onClick={onCancel}>
+            Отмена
+          </button>
+          <button className="dialog-btn-confirm" onClick={onConfirm}>
+            Удалить у всех
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -200,6 +275,8 @@ export default function ChatArea({
 }) {
   const [inputText, setInputText] = useState('');
   const [replyTo, setReplyTo] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [deleteConfirmMsg, setDeleteConfirmMsg] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [localMessages, setLocalMessages] = useState(messages);
@@ -222,7 +299,11 @@ export default function ChatArea({
     for (const file of files) {
       const validation = await validateFile(file);
       if (!validation.valid) {
-        alert(validation.error);
+        if (window.notify?.error) {
+          window.notify.error('Ошибка', validation.error);
+        } else {
+          console.error(validation.error);
+        }
         continue;
       }
 
@@ -255,7 +336,6 @@ export default function ChatArea({
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files.length > 0) {
       handleFilesSelected(Array.from(e.target.files));
-      // Reset input value to allow selecting same file again
       e.target.value = '';
     }
   };
@@ -286,14 +366,13 @@ export default function ChatArea({
     return () => window.removeEventListener('paste', handlePaste);
   }, [activeChat, currentUser]);
 
-  // Subscribe to UploadManager events to emit message when upload finishes
+  // Subscribe to UploadManager events
   useEffect(() => {
     if (!activeChat) return;
     
     const unsubscribe = UploadManager.subscribe((items) => {
       items.forEach((item) => {
         if (item.status === 'done' && item.result) {
-          // Send media via socket emitter in MainApp
           onSendMessage('', null, false, {
             mediaUrl: item.result.url,
             mediaType: item.result.type,
@@ -304,7 +383,6 @@ export default function ChatArea({
             mediaName: item.result.name,
             mediaThumbnail: item.result.thumbnail
           });
-          // Remove from queue
           UploadManager.cancel(item.id);
         }
       });
@@ -338,6 +416,7 @@ export default function ChatArea({
 
   useEffect(() => {
     setReplyTo(null);
+    setEditingMessage(null);
     setInputText('');
     setShowSearch(false);
     setSearchQuery('');
@@ -353,61 +432,15 @@ export default function ChatArea({
       }));
     };
 
-    const onMessageDeletedAll = (messageId) => {
-      setLocalMessages((previous) => previous.map((message) => {
-        if (Number(message.id) === Number(messageId)) {
-          return {
-            ...message,
-            is_deleted_for_all: 1,
-            reactions: [],
-          };
-        }
-
-        if (Number(message.reply_to_id) === Number(messageId)) {
-          return {
-            ...message,
-            reply_text: null,
-            reply_is_deleted_for_all: 1,
-          };
-        }
-
-        return message;
-      }));
-    };
-
-    const onMessageEdited = ({ messageId, text }) => {
-      setLocalMessages((previous) => previous.map((message) => {
-        if (Number(message.id) === Number(messageId)) {
-          return { ...message, text, is_edited: 1 };
-        }
-
-        if (Number(message.reply_to_id) === Number(messageId)) {
-          return { ...message, reply_text: text };
-        }
-
-        return message;
-      }));
-    };
-
     socket.on('reactionsUpdated', onReactionsUpdated);
-    socket.on('messageDeletedAll', onMessageDeletedAll);
-    socket.on('messageEdited', onMessageEdited);
 
     return () => {
       socket.off('reactionsUpdated', onReactionsUpdated);
-      socket.off('messageDeletedAll', onMessageDeletedAll);
-      socket.off('messageEdited', onMessageEdited);
     };
   }, [socket]);
 
   const scrollToMessage = (messageId) => {
     const target = messageRefs.current[messageId];
-
-    console.log('[ChatArea] scroll to original message', {
-      messageId,
-      found: Boolean(target),
-    });
-
     if (!target) return;
 
     target.scrollIntoView({
@@ -416,18 +449,13 @@ export default function ChatArea({
     });
 
     target.classList.add('msg-highlight');
-
     window.setTimeout(() => {
       target.classList.remove('msg-highlight');
     }, 1500);
   };
 
   const beginReply = (message) => {
-    console.log('[ChatArea] reply target selected', {
-      messageId: message.id,
-      text: message.text,
-    });
-
+    setEditingMessage(null);
     setReplyTo(message);
     setContextMenu(null);
 
@@ -438,6 +466,62 @@ export default function ChatArea({
 
   const cancelReply = () => {
     setReplyTo(null);
+  };
+
+  const beginEdit = (message) => {
+    if (!message || Number(message.is_deleted_for_all) === 1) return;
+    setReplyTo(null);
+    setEditingMessage(message);
+    setInputText(message.text || '');
+    setContextMenu(null);
+
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.selectionStart = textareaRef.current.value.length;
+        textareaRef.current.selectionEnd = textareaRef.current.value.length;
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+      }
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingMessage(null);
+    setInputText('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+  };
+
+  const handleDeleteSelf = (message) => {
+    if (!socket || !message) return;
+    socket.emit('deleteMessageSelf', { messageId: message.id });
+    setLocalMessages((previous) => previous.filter((m) => m.id !== message.id));
+    if (editingMessage?.id === message.id) {
+      cancelEdit();
+    }
+  };
+
+  const handleDeleteAll = (message) => {
+    if (!message || Number(message.is_deleted_for_all) === 1) return;
+    setDeleteConfirmMsg(message);
+  };
+
+  const confirmDeleteAll = () => {
+    if (!socket || !deleteConfirmMsg) return;
+    socket.emit('deleteMessageAll', { messageId: deleteConfirmMsg.id });
+    setLocalMessages((previous) =>
+      previous.map((m) =>
+        m.id === deleteConfirmMsg.id
+          ? { ...m, is_deleted_for_all: 1, text: '', media_url: null, media_thumbnail: null, reactions: [] }
+          : m
+      )
+    );
+    if (editingMessage?.id === deleteConfirmMsg.id) {
+      cancelEdit();
+    }
+    setDeleteConfirmMsg(null);
   };
 
   const handleInputChange = (event) => {
@@ -460,16 +544,36 @@ export default function ChatArea({
 
   const sendMessage = () => {
     const text = inputText.trim();
-    if (!text || !activeChat) return;
+    if (!activeChat) return;
+
+    if (editingMessage) {
+      if (!text) {
+        if (window.notify?.error) {
+          window.notify.error('Ошибка', 'Сообщение не может быть пустым');
+        }
+        return;
+      }
+
+      if (editingMessage.text?.trim() === text) {
+        cancelEdit();
+        return;
+      }
+
+      socket?.emit('editMessage', { messageId: editingMessage.id, newText: text });
+
+      setLocalMessages((previous) =>
+        previous.map((m) =>
+          m.id === editingMessage.id ? { ...m, text, is_edited: 1 } : m
+        )
+      );
+
+      cancelEdit();
+      return;
+    }
+
+    if (!text) return;
 
     const replyToId = replyTo?.id ? Number(replyTo.id) : null;
-
-    console.log('[ChatArea] sending message', {
-      text,
-      replyToId,
-      replyTarget: replyTo,
-    });
-
     onSendMessage(text, replyToId);
 
     setInputText('');
@@ -487,10 +591,17 @@ export default function ChatArea({
   };
 
   const handleInputKeyDown = (event) => {
-    if (event.key === 'Escape' && replyTo) {
-      event.preventDefault();
-      cancelReply();
-      return;
+    if (event.key === 'Escape') {
+      if (editingMessage) {
+        event.preventDefault();
+        cancelEdit();
+        return;
+      }
+      if (replyTo) {
+        event.preventDefault();
+        cancelReply();
+        return;
+      }
     }
 
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -552,207 +663,223 @@ export default function ChatArea({
   return (
     <MediaUploader onFilesSelected={handleFilesSelected}>
       <main className="chat-area">
-      {contextMenu && (
-        <ContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          msg={contextMenu.msg}
-          currentUserId={currentUser.userId}
-          onClose={() => setContextMenu(null)}
-          onReply={beginReply}
-          onCopy={(text) => navigator.clipboard?.writeText(text)}
-          onReact={(message, emoji) => quickReact(message, emoji)}
-        />
-      )}
-
-      <header className="chat-header">
-        <div className="chat-header-info">
-          <Avatar src={contactAvatar} name={contactName} size={36} />
-
-          <div className="chat-header-text">
-            <h2>{contactName}</h2>
-            {activeChat.display_name && (
-              <span className="chat-header-username">@{activeChat.username}</span>
-            )}
-          </div>
-        </div>
-
-        <div className="chat-header-actions">
-          <button
-            type="button"
-            className="icon-btn"
-            title="Поиск"
-            onClick={() => setShowSearch((visible) => !visible)}
-          >
-            🔍
-          </button>
-
-          <button type="button" onClick={onLogout} className="logout-btn">
-            Выйти
-          </button>
-        </div>
-      </header>
-
-      {showSearch && (
-        <div className="search-bar">
-          <input
-            autoFocus
-            type="search"
-            className="search-bar-input"
-            placeholder="Поиск в чате..."
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
+        {contextMenu && (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            msg={contextMenu.msg}
+            currentUserId={currentUser.userId}
+            onClose={() => setContextMenu(null)}
+            onReply={beginReply}
+            onCopy={(text) => navigator.clipboard?.writeText(text)}
+            onEdit={beginEdit}
+            onDeleteSelf={handleDeleteSelf}
+            onDeleteAll={handleDeleteAll}
+            onReact={(message, emoji) => quickReact(message, emoji)}
           />
+        )}
 
-          <button
-            type="button"
-            className="search-bar-close"
-            onClick={() => {
-              setSearchQuery('');
-              setShowSearch(false);
-            }}
-          >
-            ×
-          </button>
-        </div>
-      )}
+        {deleteConfirmMsg && (
+          <DeleteConfirmModal
+            onConfirm={confirmDeleteAll}
+            onCancel={() => setDeleteConfirmMsg(null)}
+          />
+        )}
 
-      {pinnedMessages.length > 0 && (
-        <div className="pinned-bar">
-          📌 Закреплённые сообщения: {pinnedMessages.length}
-        </div>
-      )}
+        <header className="chat-header">
+          <div className="chat-header-info">
+            <Avatar src={contactAvatar} name={contactName} size={36} />
 
-      <section className={`messages-list chat-bg--${settings?.chatBackground || 'solid'}`}>
-        {groups.map((group, groupIndex) => {
-          const senderName = group.isOwn ? currentUser.username : contactName;
-          const senderAvatar = group.isOwn ? myAvatar : contactAvatar;
-
-          return (
-            <div
-              key={`${group.senderId}-${groupIndex}`}
-              className={`msg-group ${group.isOwn ? 'msg-group--own' : 'msg-group--other'}`}
-            >
-              {!group.isOwn && (
-                <div className="msg-group__avatar">
-                  <Avatar src={senderAvatar} name={senderName} size={36} />
-                </div>
+            <div className="chat-header-text">
+              <h2>{contactName}</h2>
+              {activeChat.display_name && (
+                <span className="chat-header-username">@{activeChat.username}</span>
               )}
-
-              <div className="msg-group__bubbles">
-                {!group.isOwn && <span className="msg-sender-name">{senderName}</span>}
-
-                {group.messages.map((message, messageIndex) => (
-                  <MessageComponent
-                    key={message.id}
-                    msg={message}
-                    isOwn={group.isOwn}
-                    isFirst={messageIndex === 0}
-                    isLast={messageIndex === group.messages.length - 1}
-                    contactName={contactName}
-                    currentUser={currentUser}
-                    settings={settings}
-                    localReactions={localReactions}
-                    msgRefs={messageRefs}
-                    scrollToMsg={scrollToMessage}
-                    setReplyTo={beginReply}
-                    handleQuickReact={quickReact}
-                    handleReactionToggle={toggleReaction}
-                    handleContextMenu={handleContextMenu}
-                    isHighlighted={false}
-                    searchQuery={searchQuery}
-                  />
-                ))}
-              </div>
             </div>
-          );
-        })}
+          </div>
 
-        <div ref={messagesEndRef} />
-      </section>
+          <div className="chat-header-actions">
+            <button
+              type="button"
+              className="icon-btn"
+              title="Поиск"
+              onClick={() => setShowSearch((visible) => !visible)}
+            >
+              🔍
+            </button>
 
-      <footer className="composer">
-        {replyTo && (
-          <ReplyComposerPreview
-            replyTo={replyTo}
-            currentUser={currentUser}
-            contactName={contactName}
-            onCancel={cancelReply}
-          />
-        )}
+            <button type="button" onClick={onLogout} className="logout-btn">
+              Выйти
+            </button>
+          </div>
+        </header>
 
-        <UploadPreviewBar />
-
-        <div className="composer-row">
-          <button 
-            type="button" 
-            className="composer-btn" 
-            title="Прикрепить файл"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            📎
-          </button>
-
-          <input
-            type="file"
-            ref={fileInputRef}
-            style={{ display: 'none' }}
-            multiple
-            accept="image/*,video/*"
-            onChange={handleFileChange}
-          />
-
-          <div className="composer-input-wrap">
-            <textarea
-              ref={textareaRef}
-              rows={1}
-              value={inputText}
-              className="composer-input"
-              placeholder="Написать сообщение..."
-              onChange={handleInputChange}
-              onKeyDown={handleInputKeyDown}
+        {showSearch && (
+          <div className="search-bar">
+            <input
+              autoFocus
+              type="search"
+              className="search-bar-input"
+              placeholder="Поиск по сообщениям..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
             />
-          </div>
-
-          <button
-            type="button"
-            className="composer-btn"
-            title="Эмодзи"
-            onClick={() => setShowEmojiPicker((visible) => !visible)}
-          >
-            😊
-          </button>
-
-          <button
-            type="button"
-            className={`send-btn ${inputText.trim() ? 'send-btn--active' : ''}`}
-            title="Отправить"
-            disabled={!inputText.trim()}
-            onClick={sendMessage}
-          >
-            ➤
-          </button>
-        </div>
-
-        {showEmojiPicker && (
-          <div className="emoji-picker">
-            {EMOJI_PICKER.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                className="emoji-btn"
-                onClick={() => {
-                  setInputText((previous) => `${previous}${emoji}`);
-                  textareaRef.current?.focus();
-                }}
-              >
-                {emoji}
-              </button>
-            ))}
+            <button
+              type="button"
+              className="search-bar-close"
+              onClick={() => {
+                setShowSearch(false);
+                setSearchQuery('');
+              }}
+            >
+              ✕
+            </button>
           </div>
         )}
-      </footer>
-    </main>
+
+        {pinnedMessages.length > 0 && (
+          <div className="pinned-bar">
+            📌 Закреплённые сообщения: {pinnedMessages.length}
+          </div>
+        )}
+
+        <section className={`messages-list chat-bg--${settings?.chatBackground || 'solid'}`}>
+          {groups.map((group, groupIndex) => {
+            const senderName = group.isOwn ? currentUser.username : contactName;
+            const senderAvatar = group.isOwn ? myAvatar : contactAvatar;
+
+            return (
+              <div
+                key={`${group.senderId}-${groupIndex}`}
+                className={`msg-group ${group.isOwn ? 'msg-group--own' : 'msg-group--other'}`}
+              >
+                {!group.isOwn && (
+                  <div className="msg-group__avatar">
+                    <Avatar src={senderAvatar} name={senderName} size={36} />
+                  </div>
+                )}
+
+                <div className="msg-group__bubbles">
+                  {!group.isOwn && <span className="msg-sender-name">{senderName}</span>}
+
+                  {group.messages.map((message, messageIndex) => (
+                    <MessageComponent
+                      key={message.id}
+                      msg={message}
+                      isOwn={group.isOwn}
+                      isFirst={messageIndex === 0}
+                      isLast={messageIndex === group.messages.length - 1}
+                      contactName={contactName}
+                      currentUser={currentUser}
+                      settings={settings}
+                      localReactions={localReactions}
+                      msgRefs={messageRefs}
+                      scrollToMsg={scrollToMessage}
+                      setReplyTo={beginReply}
+                      handleQuickReact={quickReact}
+                      handleReactionToggle={toggleReaction}
+                      handleContextMenu={handleContextMenu}
+                      isHighlighted={false}
+                      searchQuery={searchQuery}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          <div ref={messagesEndRef} />
+        </section>
+
+        <footer className="composer">
+          {editingMessage && (
+            <EditComposerPreview
+              editingMessage={editingMessage}
+              onCancel={cancelEdit}
+            />
+          )}
+
+          {replyTo && !editingMessage && (
+            <ReplyComposerPreview
+              replyTo={replyTo}
+              currentUser={currentUser}
+              contactName={contactName}
+              onCancel={cancelReply}
+            />
+          )}
+
+          <UploadPreviewBar />
+
+          <div className="composer-row">
+            <button 
+              type="button" 
+              className="composer-btn" 
+              title="Прикрепить файл"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              📎
+            </button>
+
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              multiple
+              accept="image/*,video/*"
+              onChange={handleFileChange}
+            />
+
+            <div className="composer-input-wrap">
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                value={inputText}
+                className="composer-input"
+                placeholder={editingMessage ? "Редактирование..." : "Написать сообщение..."}
+                onChange={handleInputChange}
+                onKeyDown={handleInputKeyDown}
+              />
+            </div>
+
+            <button
+              type="button"
+              className="composer-btn"
+              title="Эмодзи"
+              onClick={() => setShowEmojiPicker((visible) => !visible)}
+            >
+              😊
+            </button>
+
+            <button
+              type="button"
+              className={`send-btn ${inputText.trim() ? 'send-btn--active' : ''} ${editingMessage ? 'send-btn--edit' : ''}`}
+              title={editingMessage ? "Сохранить изменения" : "Отправить"}
+              disabled={!inputText.trim()}
+              onClick={sendMessage}
+            >
+              {editingMessage ? '✓' : '➤'}
+            </button>
+          </div>
+
+          {showEmojiPicker && (
+            <div className="emoji-picker">
+              {EMOJI_PICKER.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  className="emoji-btn"
+                  onClick={() => {
+                    setInputText((previous) => `${previous}${emoji}`);
+                    textareaRef.current?.focus();
+                  }}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          )}
+        </footer>
+      </main>
     </MediaUploader>
   );
 }

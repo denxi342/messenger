@@ -446,6 +446,96 @@ input, textarea { font-family: 'Inter', sans-serif; }
   background: rgba(255, 255, 255, 0.1);
 }
 
+/* Edit preview above the composer */
+.composer-edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px 4px;
+  background: rgba(234, 179, 8, 0.05);
+  border-left: 3px solid #eab308;
+  transition: background 0.15s ease;
+}
+
+.composer-edit-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.composer-edit-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.composer-edit-content {
+  min-width: 0;
+  flex: 1;
+}
+
+.composer-edit-label {
+  display: block;
+  margin-bottom: 2px;
+  overflow: hidden;
+  color: #eab308;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-edit-text {
+  display: block;
+  overflow: hidden;
+  color: var(--text-secondary, #aaa7b6);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-edit-close {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  color: var(--text-secondary, #aaa7b6);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.composer-edit-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.ctx-item--danger {
+  color: #ef4444 !important;
+}
+
+.ctx-item--danger:hover {
+  background: rgba(239, 68, 68, 0.15) !important;
+  color: #f87171 !important;
+}
+
+.send-btn--edit {
+  background: #eab308 !important;
+  color: #000 !important;
+}
+
+.send-btn--edit:hover {
+  background: #facc15 !important;
+}
+
 /* Main composer row */
 .composer-row {
   display: flex; align-items: flex-end; gap: 8px;

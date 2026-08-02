@@ -255,9 +255,9 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
         const updated = {};
         Object.entries(prev).forEach(([cid, msgs]) => {
           updated[cid] = msgs.map(m => {
-            if (m.id === messageId) return { ...m, is_deleted_for_all: 1, reactions: [] };
+            if (m.id === messageId) return { ...m, is_deleted_for_all: 1, text: '', media_url: null, media_thumbnail: null, reactions: [] };
             if (Number(m.reply_to_id) === Number(messageId)) {
-              return { ...m, reply_text: null, reply_is_deleted_for_all: 1 };
+              return { ...m, reply_text: '', reply_is_deleted_for_all: 1 };
             }
             return m;
           });
@@ -293,7 +293,11 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
     });
 
     socketRef.current.on('actionError', ({ event, reason }) => {
-      alert(`Ошибка: ${reason}`);
+      if (window.notify?.error) {
+        window.notify.error('Ошибка', reason || 'Не удалось выполнить действие');
+      } else {
+        console.error(`[actionError] ${event}: ${reason}`);
+      }
     });
 
     socketRef.current.on('typing', ({ userId, isTyping }) => {
