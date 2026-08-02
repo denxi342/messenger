@@ -432,10 +432,61 @@ export default function ChatArea({
       }));
     };
 
+    // Direct socket listeners so localMessages updates instantly for BOTH sender and recipient
+    const onMessageDeletedAll = (payload) => {
+      const targetId = Number(
+        payload && typeof payload === 'object' ? payload.messageId : payload
+      );
+      setLocalMessages((prev) =>
+        prev.map((m) => {
+          if (Number(m.id) === targetId) {
+            return { ...m, is_deleted_for_all: 1, text: '', media_url: null, media_thumbnail: null, reactions: [] };
+          }
+          if (Number(m.reply_to_id) === targetId) {
+            return { ...m, reply_text: '', reply_is_deleted_for_all: 1 };
+          }
+          return m;
+        })
+      );
+      // Also clear reactions for this message
+      setLocalReactions((prev) => {
+        const next = { ...prev };
+        delete next[targetId];
+        return next;
+      });
+    };
+
+    const onMessageEdited = (payload) => {
+      const targetId = Number(
+        payload && typeof payload === 'object' ? payload.messageId : payload
+      );
+      const text = payload && typeof payload === 'object' ? payload.text : '';
+      setLocalMessages((prev) =>
+        prev.map((m) => {
+          if (Number(m.id) === targetId) return { ...m, text, is_edited: 1 };
+          if (Number(m.reply_to_id) === targetId) return { ...m, reply_text: text };
+          return m;
+        })
+      );
+    };
+
+    const onMessageDeletedSelf = (payload) => {
+      const targetId = Number(
+        payload && typeof payload === 'object' ? payload.messageId : payload
+      );
+      setLocalMessages((prev) => prev.filter((m) => Number(m.id) !== targetId));
+    };
+
     socket.on('reactionsUpdated', onReactionsUpdated);
+    socket.on('messageDeletedAll', onMessageDeletedAll);
+    socket.on('messageEdited', onMessageEdited);
+    socket.on('messageDeletedSelf', onMessageDeletedSelf);
 
     return () => {
       socket.off('reactionsUpdated', onReactionsUpdated);
+      socket.off('messageDeletedAll', onMessageDeletedAll);
+      socket.off('messageEdited', onMessageEdited);
+      socket.off('messageDeletedSelf', onMessageDeletedSelf);
     };
   }, [socket]);
 
