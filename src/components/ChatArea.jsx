@@ -279,7 +279,6 @@ export default function ChatArea({
   const [deleteConfirmMsg, setDeleteConfirmMsg] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [localMessages, setLocalMessages] = useState(messages);
   const [localReactions, setLocalReactions] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
@@ -293,7 +292,7 @@ export default function ChatArea({
   // Auto scroll to bottom when new messages load or arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [localMessages]);
+  }, [messages]);
 
   const handleFilesSelected = async (files) => {
     for (const file of files) {
@@ -401,16 +400,14 @@ export default function ChatArea({
     activeChatIdRef.current = activeChat?.id;
   }, [activeChat]);
 
+  // Sync reactions from incoming messages prop (e.g. on initial history load or chat switch)
   useEffect(() => {
-    setLocalMessages(messages);
-
     const reactionsMap = {};
     messages.forEach((message) => {
       if (Array.isArray(message.reactions)) {
         reactionsMap[message.id] = message.reactions;
       }
     });
-
     setLocalReactions(reactionsMap);
   }, [messages]);
 
@@ -432,61 +429,10 @@ export default function ChatArea({
       }));
     };
 
-    // Direct socket listeners so localMessages updates instantly for BOTH sender and recipient
-    const onMessageDeletedAll = (payload) => {
-      const targetId = Number(
-        payload && typeof payload === 'object' ? payload.messageId : payload
-      );
-      setLocalMessages((prev) =>
-        prev.map((m) => {
-          if (Number(m.id) === targetId) {
-            return { ...m, is_deleted_for_all: 1, text: '', media_url: null, media_thumbnail: null, reactions: [] };
-          }
-          if (Number(m.reply_to_id) === targetId) {
-            return { ...m, reply_text: '', reply_is_deleted_for_all: 1 };
-          }
-          return m;
-        })
-      );
-      // Also clear reactions for this message
-      setLocalReactions((prev) => {
-        const next = { ...prev };
-        delete next[targetId];
-        return next;
-      });
-    };
-
-    const onMessageEdited = (payload) => {
-      const targetId = Number(
-        payload && typeof payload === 'object' ? payload.messageId : payload
-      );
-      const text = payload && typeof payload === 'object' ? payload.text : '';
-      setLocalMessages((prev) =>
-        prev.map((m) => {
-          if (Number(m.id) === targetId) return { ...m, text, is_edited: 1 };
-          if (Number(m.reply_to_id) === targetId) return { ...m, reply_text: text };
-          return m;
-        })
-      );
-    };
-
-    const onMessageDeletedSelf = (payload) => {
-      const targetId = Number(
-        payload && typeof payload === 'object' ? payload.messageId : payload
-      );
-      setLocalMessages((prev) => prev.filter((m) => Number(m.id) !== targetId));
-    };
-
     socket.on('reactionsUpdated', onReactionsUpdated);
-    socket.on('messageDeletedAll', onMessageDeletedAll);
-    socket.on('messageEdited', onMessageEdited);
-    socket.on('messageDeletedSelf', onMessageDeletedSelf);
 
     return () => {
       socket.off('reactionsUpdated', onReactionsUpdated);
-      socket.off('messageDeletedAll', onMessageDeletedAll);
-      socket.off('messageEdited', onMessageEdited);
-      socket.off('messageDeletedSelf', onMessageDeletedSelf);
     };
   }, [socket]);
 
@@ -548,7 +494,7 @@ export default function ChatArea({
   const handleDeleteSelf = (message) => {
     if (!socket || !message) return;
     socket.emit('deleteMessageSelf', { messageId: message.id });
-    setLocalMessages((previous) => previous.filter((m) => m.id !== message.id));
+    // MainApp.messageDeletedSelf handler will update messagesData → messages prop re-renders
     if (editingMessage?.id === message.id) {
       cancelEdit();
     }
@@ -562,13 +508,7 @@ export default function ChatArea({
   const confirmDeleteAll = () => {
     if (!socket || !deleteConfirmMsg) return;
     socket.emit('deleteMessageAll', { messageId: deleteConfirmMsg.id });
-    setLocalMessages((previous) =>
-      previous.map((m) =>
-        m.id === deleteConfirmMsg.id
-          ? { ...m, is_deleted_for_all: 1, text: '', media_url: null, media_thumbnail: null, reactions: [] }
-          : m
-      )
-    );
+    // MainApp.messageDeletedAll handler will update messagesData → messages prop re-renders for ALL clients
     if (editingMessage?.id === deleteConfirmMsg.id) {
       cancelEdit();
     }
@@ -611,13 +551,7 @@ export default function ChatArea({
       }
 
       socket?.emit('editMessage', { messageId: editingMessage.id, newText: text });
-
-      setLocalMessages((previous) =>
-        previous.map((m) =>
-          m.id === editingMessage.id ? { ...m, text, is_edited: 1 } : m
-        )
-      );
-
+      // MainApp.messageEdited handler will update messagesData → messages prop re-renders for ALL clients
       cancelEdit();
       return;
     }
@@ -693,10 +627,10 @@ export default function ChatArea({
   };
 
   const filteredMessages = searchQuery.trim()
-    ? localMessages.filter((message) =>
+    ? messages.filter((message) =>
       String(message.text || '').toLowerCase().includes(searchQuery.trim().toLowerCase())
     )
-    : localMessages;
+    : messages;
 
   const groups = groupMessages(filteredMessages, currentUser.userId);
 
