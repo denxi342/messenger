@@ -240,23 +240,25 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
     });
 
     // Real-time message state updates
-    socketRef.current.on('messageDeletedSelf', (messageId) => {
+    socketRef.current.on('messageDeletedSelf', (payload) => {
+      const targetId = Number((payload && typeof payload === 'object') ? payload.messageId : payload);
       setMessagesData(prev => {
         const updated = {};
         Object.entries(prev).forEach(([cid, msgs]) => {
-          updated[cid] = msgs.filter(m => m.id !== messageId);
+          updated[cid] = msgs.filter(m => Number(m.id) !== targetId);
         });
         return updated;
       });
     });
 
-    socketRef.current.on('messageDeletedAll', (messageId) => {
+    socketRef.current.on('messageDeletedAll', (payload) => {
+      const targetId = Number((payload && typeof payload === 'object') ? payload.messageId : payload);
       setMessagesData(prev => {
         const updated = {};
         Object.entries(prev).forEach(([cid, msgs]) => {
           updated[cid] = msgs.map(m => {
-            if (m.id === messageId) return { ...m, is_deleted_for_all: 1, text: '', media_url: null, media_thumbnail: null, reactions: [] };
-            if (Number(m.reply_to_id) === Number(messageId)) {
+            if (Number(m.id) === targetId) return { ...m, is_deleted_for_all: 1, text: '', media_url: null, media_thumbnail: null, reactions: [] };
+            if (Number(m.reply_to_id) === targetId) {
               return { ...m, reply_text: '', reply_is_deleted_for_all: 1 };
             }
             return m;
@@ -266,13 +268,15 @@ const MainApp = ({ user, onLogout, onUserUpdate }) => {
       });
     });
 
-    socketRef.current.on('messageEdited', ({ messageId, text }) => {
+    socketRef.current.on('messageEdited', (payload) => {
+      const targetId = Number((payload && typeof payload === 'object') ? payload.messageId : payload);
+      const text = payload && typeof payload === 'object' ? payload.text : '';
       setMessagesData(prev => {
         const updated = {};
         Object.entries(prev).forEach(([cid, msgs]) => {
           updated[cid] = msgs.map(m => {
-            if (m.id === messageId) return { ...m, text, is_edited: 1 };
-            if (Number(m.reply_to_id) === Number(messageId)) return { ...m, reply_text: text };
+            if (Number(m.id) === targetId) return { ...m, text, is_edited: 1 };
+            if (Number(m.reply_to_id) === targetId) return { ...m, reply_text: text };
             return m;
           });
         });
