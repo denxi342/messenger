@@ -414,12 +414,17 @@ app.post(['/login', '/api/login'], async (req, res) => {
 // --- PROFILE ENDPOINTS ---
 
 app.get(['/profile', '/api/profile'], auth, async (req, res) => {
-  const user = await db.get(
-    'SELECT id, username, display_name, bio, avatar_base64, created_at FROM users WHERE id = ?',
-    [req.user.userId]
-  );
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json(user);
+  try {
+    const user = await db.get(
+      'SELECT id, username, display_name, bio, avatar_base64, created_at FROM users WHERE id = ?',
+      [req.user.userId]
+    );
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  } catch (err) {
+    console.error('Profile fetch error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 async function broadcastProfileUpdate(userId) {
