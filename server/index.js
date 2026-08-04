@@ -1006,10 +1006,14 @@ io.on('connection', (socket) => {
       const sId = Number(msg.sender_id);
       const rId = Number(msg.recipient_id);
       const eventData = { messageId: id, id };
-      console.log(`[deleteMessageAll] DB updated, broadcasting to user_${sId} and user_${rId}`);
+      console.log(`[deleteMessageAll] DB updated, broadcasting messageDeletedAll id=${id} to user_${sId}, user_${rId} and io.emit`);
       io.to(`user_${sId}`).emit('messageDeletedAll', eventData);
       io.to(`user_${rId}`).emit('messageDeletedAll', eventData);
-    } catch (e) { console.error('[deleteMessageAll] error:', e); }
+      io.emit('messageDeletedAll', eventData);
+    } catch (e) {
+      console.error('[deleteMessageAll] error:', e);
+      socket.emit('actionError', { event: 'deleteMessageAll', reason: 'Ошибка удаления: ' + (e.message || 'серверная ошибка') });
+    }
   });
 
   socket.on('editMessage', async (payload) => {
@@ -1077,7 +1081,10 @@ io.on('connection', (socket) => {
       console.log(`[editMessage] DB updated, broadcasting to user_${sId} and user_${rId}`);
       io.to(`user_${sId}`).emit('messageEdited', eventData);
       io.to(`user_${rId}`).emit('messageEdited', eventData);
-    } catch (e) { console.error('[editMessage] error:', e); }
+    } catch (e) {
+      console.error('[editMessage] error:', e);
+      socket.emit('actionError', { event: 'editMessage', reason: 'Ошибка редактирования: ' + (e.message || 'серверная ошибка') });
+    }
   });
 
   socket.on('pinMessage', async ({ messageId, contactId }) => {
