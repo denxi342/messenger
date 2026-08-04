@@ -1000,7 +1000,7 @@ io.on('connection', (socket) => {
         }
       }
 
-      await db.run('UPDATE messages SET text = "", is_deleted_for_all = 1, media_url = NULL, media_thumbnail = NULL WHERE id = ?', [id]);
+      await db.run('UPDATE messages SET text = ?, is_deleted_for_all = 1, media_url = NULL, media_thumbnail = NULL WHERE id = ?', ['', id]);
       await db.run('DELETE FROM reactions WHERE message_id = ?', [id]);
 
       const sId = Number(msg.sender_id);
